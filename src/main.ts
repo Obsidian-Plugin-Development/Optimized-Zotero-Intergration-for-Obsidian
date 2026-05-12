@@ -12,6 +12,7 @@ import {
   noteExportPrompt,
 } from './bbt/exportNotes';
 import './bbt/template.helpers';
+import { setLocale, t } from './locale/i18n';
 import {
   currentVersion,
   downloadAndExtract,
@@ -30,6 +31,7 @@ const citationCommandIDPrefix = 'zdc-';
 const exportCommandIDPrefix = 'zdc-exp-';
 const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   database: 'Zotero',
+  locale: 'en',
   noteImportFolder: '',
   pdfExportImageDPI: 120,
   pdfExportImageFormat: 'jpg',
@@ -69,6 +71,7 @@ export default class ZoteroConnector extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    setLocale(this.settings.locale || 'en');
     this.emitter = new Events();
 
     this.updatePDFUtility();
@@ -85,7 +88,7 @@ export default class ZoteroConnector extends Plugin {
 
     this.addCommand({
       id: 'zdc-insert-notes',
-      name: 'Insert notes into current document',
+      name: t('command.insertNotes'),
       editorCallback: (editor) => {
         const database = {
           database: this.settings.database,
@@ -104,7 +107,7 @@ export default class ZoteroConnector extends Plugin {
 
     this.addCommand({
       id: 'zdc-import-notes',
-      name: 'Import notes',
+      name: t('command.importNotes'),
       callback: () => {
         const database = {
           database: this.settings.database,
@@ -123,7 +126,7 @@ export default class ZoteroConnector extends Plugin {
 
     this.addCommand({
       id: 'show-zotero-debug-view',
-      name: 'Data explorer',
+      name: t('command.dataExplorer'),
       callback: () => {
         this.activateDataExplorer();
       },
@@ -219,7 +222,7 @@ export default class ZoteroConnector extends Plugin {
     const format = this.settings.exportFormats.find((f) => f.name === name);
 
     if (!format) {
-      throw new Error(`Error: Import format "${name}" not found`);
+      throw new Error(t('notice.importFormatNotFound', name));
     }
 
     const database = {
@@ -322,7 +325,7 @@ export default class ZoteroConnector extends Plugin {
     ) {
       const modal = new LoadingModal(
         app,
-        'Updating Obsidian Zotero Integration PDF Utility...'
+        t('modal.updatingPDFUtility')
       );
       modal.open();
 

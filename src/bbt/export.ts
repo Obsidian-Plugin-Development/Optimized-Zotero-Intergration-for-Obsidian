@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync } from 'fs';
 import { Notice, TFile, htmlToMarkdown, moment, normalizePath } from 'obsidian';
 import path from 'path';
 
+import { t } from '../locale/i18n';
 import { doesEXEExist, getVaultRoot } from '../helpers';
 import {
   DatabaseWithPort,
@@ -186,7 +187,7 @@ function convertNativeAnnotation(
         copyFileSync(input, imagePath);
       } catch (e) {
         new Notice(
-          'Error: unable to copy annotation image from Zotero into your vault',
+          t('notice.cannotCopyImage'),
           7000
         );
         console.error(e);
@@ -373,7 +374,7 @@ function errorToHelpfulNotification(
   new Notice(
     createFragment((f) => {
       f.createSpan({
-        text: `Error parsing template "${templatePath}": `,
+        text: `${t('error.parsingTemplate', templatePath)} `,
       });
       f.createEl('code', {
         text: generateHelpfulTemplateError(e, template),
@@ -824,7 +825,7 @@ export async function exportToMarkdown(
       createdOrUpdatedMarkdownFiles.push(markdownPath);
     } catch (e) {
       new Notice(
-        `Import failed for ${markdownPath}, check developer console for details`,
+        t('notice.importFailed', markdownPath),
         7000
       );
       console.error(e);

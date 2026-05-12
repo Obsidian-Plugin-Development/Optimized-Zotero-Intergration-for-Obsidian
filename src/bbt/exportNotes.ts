@@ -8,6 +8,8 @@ import {
   htmlToMarkdown,
   normalizePath,
 } from 'obsidian';
+
+import { t } from '../locale/i18n';
 import path from 'path';
 import { getVaultRoot } from 'src/helpers';
 import { DatabaseWithPort } from 'src/types';
@@ -70,7 +72,7 @@ export async function processZoteroAnnotationNotes(
             copyFileSync(input, path.join(getVaultRoot(), destPath));
           } catch (e) {
             new Notice(
-              'Error: unable to copy annotation image from Zotero into your vault',
+              t('notice.cannotCopyImage'),
               7000
             );
             console.error(e);
@@ -142,14 +144,14 @@ export async function noteExportPrompt(
   const notes = await getNotesFromCiteKeys(citeKeys, database);
 
   if (!notes) {
-    new Notice('No notes found for selected items', 7000);
+    new Notice(t('notice.noNotesFound'), 7000);
     return;
   }
 
   const keys = Object.keys(notes);
 
   if (!keys.length) {
-    new Notice('No notes found for selected items', 7000);
+    new Notice(t('notice.noNotesFound'), 7000);
     return;
   }
 
@@ -278,7 +280,7 @@ export async function newFile(
     }
   } catch (e) {
     console.error(e);
-    new Notice(`Error creating file "${path}": ${e.message}`, 10000);
+    new Notice(`${t('notice.errorCreatingFile', path)} ${e.message}`, 10000);
     return null;
   }
 

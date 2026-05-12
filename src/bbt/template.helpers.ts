@@ -1,6 +1,8 @@
 import { Notice, TFile, moment } from 'obsidian';
 import { ExportToMarkdownParams } from 'src/types';
 
+import { t } from '../locale/i18n';
+
 export function loadTemplate(
   name: string,
   path: string
@@ -12,7 +14,7 @@ export function loadTemplate(
   );
 
   if (!templateFile) {
-    new Notice(`Error: ${name} template not found ${path}`);
+    new Notice(t('notice.templateNotFound', name, path));
     return null;
   }
 

@@ -15,6 +15,7 @@ import {
 } from 'src/helpers';
 import { ZoteroConnectorSettings } from 'src/types';
 
+import { t } from '../locale/i18n';
 import { Icon } from './Icon';
 import { SettingItem } from './SettingItem';
 
@@ -73,10 +74,7 @@ export async function downloadAndExtract() {
     scopeExe();
   } catch (e) {
     console.error(e);
-    new Notice(
-      'Error downloading PDF utility. Check the console for more details.',
-      10000
-    );
+    new Notice(t('notice.pdfDownloadError'), 10000);
   }
 
   return true;
@@ -133,28 +131,26 @@ export function AssetDownloader(props: {
   }, []);
 
   const desc = [
-    'Extracting data from PDFs requires an external tool.',
-    'This plugin will still work without it, but annotations will not be included in exports.',
+    t('settings.pdfUtility.desc1'),
+    t('settings.pdfUtility.desc2'),
   ];
 
   const overrideDesc = (
     <>
-      Override the path to the PDF utility. Specify an absolute path to the
-      pdfannots2json executable.{' '}
+      {t('settings.pdfUtility.override.desc1')}{' '}
       <a
         href="https://github.com/mgmeyers/pdfannots2json/releases"
         target="_blank"
         rel="noreferrer"
       >
-        Download the executable here.
+        {t('settings.pdfUtility.override.desc2')}
       </a>{' '}
-      You may need to provide Obsidian the appropriate OS permissions to access
-      the executable.
+      {t('settings.pdfUtility.override.desc3')}
     </>
   );
 
   const Override = (
-    <SettingItem name="PDF Utility Path Override" description={overrideDesc}>
+    <SettingItem name={t('settings.pdfUtility.override')} description={overrideDesc}>
       <input
         onChange={(e) => setOverride((e.target as HTMLInputElement).value)}
         type="text"
@@ -163,7 +159,7 @@ export function AssetDownloader(props: {
       />
       <div
         className="clickable-icon setting-editor-extra-setting-button"
-        aria-label="Select the pdfannots2json executable"
+        aria-label={t('settings.pdfUtility.selectExe')}
         onClick={() => {
           const path = require('electron').remote.dialog.showOpenDialogSync({
             properties: ['openFile'],
@@ -182,13 +178,13 @@ export function AssetDownloader(props: {
   if (exists && isUpToDate) {
     return (
       <>
-        <SettingItem name="PDF Utility" description={desc.join(' ')}>
+        <SettingItem name={t('settings.pdfUtility')} description={desc.join(' ')}>
           <div className="zt-asset-success">
             <div className="zt-asset-success__icon">
               <Icon name="check-small" />
             </div>
             <div className="zt-asset-success__message">
-              PDF utility is up to date.
+              {t('settings.pdfUtility.upToDate')}
             </div>
           </div>
         </SettingItem>
@@ -202,21 +198,21 @@ export function AssetDownloader(props: {
       {desc.join(' ')}{' '}
       {exists && (
         <strong className="mod-warning">
-          The PDF extraction tool requires updating. Please re-download.
+          {t('settings.pdfUtility.needsUpdate')}
         </strong>
       )}
       {!exists && !overridePath && (
-        <strong>Click the button to download.</strong>
+        <strong>{t('settings.pdfUtility.clickToDownload')}</strong>
       )}
     </>
   );
 
   return (
     <>
-      <SettingItem name="PDF Utility" description={descFrag}>
+      <SettingItem name={t('settings.pdfUtility')} description={descFrag}>
         {!overridePath && (
           <button disabled={isLoading} onClick={handleDownload}>
-            {isLoading ? 'Downloading...' : 'Download'}
+            {isLoading ? t('settings.pdfUtility.downloading') : t('settings.pdfUtility.download')}
           </button>
         )}
       </SettingItem>

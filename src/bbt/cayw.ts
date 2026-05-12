@@ -1,5 +1,6 @@
 import { Notice, request } from 'obsidian';
 
+import { t } from '../locale/i18n';
 import { getCurrentWindow } from '../helpers';
 import { CitationFormat, DatabaseWithPort } from '../types';
 import { LoadingModal } from './LoadingModal';
@@ -29,7 +30,7 @@ export async function isZoteroRunning(
 
   let modal: LoadingModal;
   if (!silent) {
-    modal = new LoadingModal(app, 'Fetching data from Zotero...');
+    modal = new LoadingModal(app, t('modal.fetchingData'));
     modal.open();
   }
   const qid = Symbol();
@@ -53,7 +54,7 @@ export async function isZoteroRunning(
     modal?.close();
     !silent &&
       new Notice(
-        'Cannot connect to Zotero. Please ensure it is running and the Better BibTeX plugin is installed',
+        t('notice.zoteroNotRunning'),
         10000
       );
     ZQueue.end(qid);
@@ -87,7 +88,7 @@ export async function getCAYW(
     return null;
   }
 
-  const modal = new LoadingModal(app, 'Awaiting item selection from Zotero...');
+  const modal = new LoadingModal(app, t('modal.awaitingSelection'));
   modal.open();
 
   const qid = Symbol();
@@ -116,7 +117,7 @@ export async function getCAYW(
     win.show();
     console.error(e);
     modal.close();
-    new Notice(`Error processing citation: ${e.message}`, 10000);
+    new Notice(`${t('notice.citationError')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
@@ -157,7 +158,7 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
     return null;
   }
 
-  const modal = new LoadingModal(app, 'Awaiting item selection from Zotero...');
+  const modal = new LoadingModal(app, t('modal.awaitingSelection'));
   modal.open();
 
   const qid = Symbol();
@@ -185,7 +186,7 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
     win.show();
     console.error(e);
     modal.close();
-    new Notice(`Error retrieving cite key: ${e.message}`, 10000);
+    new Notice(`${t('notice.citeKeyError')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }

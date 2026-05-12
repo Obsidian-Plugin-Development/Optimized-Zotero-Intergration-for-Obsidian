@@ -1,6 +1,8 @@
 import nunjucks, { Callback, Extension, Loader, LoaderSource } from 'nunjucks';
 import { moment } from 'obsidian';
 
+import { t } from '../locale/i18n';
+
 (nunjucks.runtime as any).memberLookup = function memberLookup(
   obj: any,
   val: any
@@ -232,7 +234,7 @@ export class ObsidianMarkdownLoader extends Loader {
 
     if (!linkPath) {
       return callback(
-        new Error('Cannot find file. Invalid markdown link: ' + name),
+        new Error(t('error.cannotFindFile') + ' ' + name),
         null
       );
     }
@@ -244,7 +246,7 @@ export class ObsidianMarkdownLoader extends Loader {
 
     if (!file) {
       return callback(
-        new Error('Cannot find file. File not found: ' + name),
+        new Error(t('error.fileNotFound') + ' ' + name),
         null
       );
     }

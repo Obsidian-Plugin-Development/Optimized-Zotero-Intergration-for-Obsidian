@@ -2,6 +2,7 @@ import React, { ChangeEvent } from 'react';
 import { SingleValue } from 'react-select';
 import AsyncSelect from 'react-select/async';
 
+import { t } from '../locale/i18n';
 import { CitationFormat, Format } from '../types';
 import { Icon } from './Icon';
 import { cslListRaw } from './cslList';
@@ -117,7 +118,7 @@ export function CiteFormatSettings({
   return (
     <div className="zt-format">
       <div className="zt-format__form">
-        <div className="zt-format__label">Name</div>
+        <div className="zt-format__label">{t('cite.name')}</div>
         <div className="zt-format__input-wrapper">
           <input onChange={onChangeName} type="text" value={format.name} />
           <div className="zt-format__delete">
@@ -129,7 +130,7 @@ export function CiteFormatSettings({
       </div>
 
       <div className="zt-format__form">
-        <div className="zt-format__label">Output Format</div>
+        <div className="zt-format__label">{t('cite.outputFormat')}</div>
         <div className="zt-format__input-wrapper">
           <select
             className="dropdown"
@@ -150,7 +151,7 @@ export function CiteFormatSettings({
 
       {format.format === 'template' && (
         <div className="zt-format__form">
-          <div className="zt-format__label">Template</div>
+          <div className="zt-format__label">{t('cite.template')}</div>
           <div className="zt-format__input-wrapper">
             <textarea
               rows={4}
@@ -159,11 +160,8 @@ export function CiteFormatSettings({
             />
           </div>
           <div className="zt-format__input-note">
-            Citation templates have access to a subset of the Zotero item's
-            data. The item's first attachement is available under the{' '}
-            <pre>attachment</pre> key. Annotations are not provided. Open the
-            data explorer from the command pallet to see available template
-            data. Templates are written using{' '}
+            {t('cite.template.note1')}{' '}
+            <pre>attachment</pre> {t('cite.template.note2')}{' '}
             <a
               href="https://mozilla.github.io/nunjucks/templating.html#variables"
               target="_blank"
@@ -177,7 +175,7 @@ export function CiteFormatSettings({
               target="_blank"
               rel="noreferrer"
             >
-              See the templating documentation here
+              {t('export.templateFile.note2')}
             </a>
             .
           </div>
@@ -190,13 +188,13 @@ export function CiteFormatSettings({
         <div className="zt-format__form">
           <div className="zt-format__label">
             {format.format === 'template'
-              ? 'Bibliography Style'
-              : 'Citation Style'}
+              ? t('cite.style.bibliography')
+              : t('cite.style.citation')}
           </div>
           <div className="zt-format__input-wrapper">
             <AsyncSelect
               noOptionsMessage={NoOptionMessage}
-              placeholder="Search..."
+              placeholder={t('export.search')}
               cacheOptions
               defaultValue={defaultStyle}
               className="zt-multiselect"
@@ -207,13 +205,13 @@ export function CiteFormatSettings({
             />
           </div>
           <div className="zt-format__input-note">
-            Note, the chosen style must be installed in Zotero. See{' '}
+            {t('cite.style.note')}{' '}
             <a
               target="_blank"
               href="https://www.zotero.org/support/styles"
               rel="noreferrer"
             >
-              Zotero: Citation Styles
+              {t('cite.style.note2')}
             </a>
           </div>
         </div>
@@ -221,7 +219,7 @@ export function CiteFormatSettings({
 
       {['latex', 'biblatex'].contains(format.format) && (
         <div className="zt-format__form">
-          <div className="zt-format__label">Citation Command</div>
+          <div className="zt-format__label">{t('cite.command')}</div>
           <div className="zt-format__input-wrapper">
             <input
               type="text"
@@ -234,7 +232,7 @@ export function CiteFormatSettings({
 
       {format.format === 'pandoc' && (
         <div className="zt-format__form">
-          <div className="zt-format__label">Include Brackets</div>
+          <div className="zt-format__label">{t('cite.brackets')}</div>
           <div className="zt-format__input-wrapper">
             <div
               onClick={onChangeBrackets}

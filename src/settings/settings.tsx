@@ -5,6 +5,12 @@ import which from 'which';
 
 import ZoteroConnector from '../main';
 import {
+  getLocale,
+  getLocaleOptions,
+  setLocale,
+  t,
+} from '../locale/i18n';
+import {
   CitationFormat,
   ExportFormat,
   ZoteroConnectorSettings,
@@ -50,6 +56,8 @@ function SettingsComponent({
   const [ocrState, setOCRState] = React.useState(settings.pdfExportImageOCR);
 
   const [concat, setConcat] = React.useState(!!settings.shouldConcat);
+
+  const [locale, setLocaleState] = React.useState(getLocale());
 
   const updateCite = React.useCallback(
     debounce(
@@ -116,11 +124,35 @@ function SettingsComponent({
 
   return (
     <div>
-      <SettingItem name="General Settings" isHeading />
+      <SettingItem name={t('settings.general')} isHeading />
+
+      {/* 语言切换 */}
+      <SettingItem
+        name={t('settings.locale')}
+        description={t('settings.locale.desc')}
+      >
+        <select
+          className="dropdown"
+          value={locale}
+          onChange={(e) => {
+            const newLocale = (e.target as HTMLSelectElement).value as 'en' | 'zh-cn';
+            setLocaleState(newLocale);
+            setLocale(newLocale);
+            updateSetting('locale', newLocale);
+          }}
+        >
+          {getLocaleOptions().map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </SettingItem>
+
       <AssetDownloader settings={settings} updateSetting={updateSetting} />
       <SettingItem
-        name="Database"
-        description="Supports Zotero and Juris-M. Alternatively a custom port number can be specified."
+        name={t('settings.database')}
+        description={t('settings.database.desc')}
       >
         <select
           className="dropdown"
@@ -142,22 +174,22 @@ function SettingsComponent({
       </SettingItem>
       {useCustomPort ? (
         <SettingItem
-          name="Port number"
-          description="If a custom port number has been set in Zotero, enter it here."
+          name={t('settings.port')}
+          description={t('settings.port.desc')}
         >
           <input
             onChange={(e) =>
               updateSetting('port', (e.target as HTMLInputElement).value)
             }
             type="number"
-            placeholder="Example: 23119"
+            placeholder={t('settings.port.placeholder')}
             defaultValue={settings.port}
           />
         </SettingItem>
       ) : null}
       <SettingItem
-        name="Note Import Location"
-        description="Notes imported from Zotero will be added to this folder in your vault"
+        name={t('settings.noteImportFolder')}
+        description={t('settings.noteImportFolder.desc')}
       >
         <input
           onChange={(e) =>
@@ -168,13 +200,13 @@ function SettingsComponent({
           }
           type="text"
           spellCheck={false}
-          placeholder="Example: folder 1/folder 2"
+          placeholder={t('settings.noteImportFolder.placeholder')}
           defaultValue={settings.noteImportFolder}
         />
       </SettingItem>
       <SettingItem
-        name="Open the created or updated note(s) after import"
-        description="The created or updated markdown files resulting from the import will be automatically opened."
+        name={t('settings.openAfterImport')}
+        description={t('settings.openAfterImport.desc')}
       >
         <div
           onClick={() => {
@@ -189,8 +221,8 @@ function SettingsComponent({
         />
       </SettingItem>
       <SettingItem
-        name="Which notes to open after import"
-        description="Open either the first note imported, the last note imported, or all notes in new tabs."
+        name={t('settings.whichNotesToOpen')}
+        description={t('settings.whichNotesToOpen.desc')}
       >
         <select
           className="dropdown"
@@ -203,14 +235,14 @@ function SettingsComponent({
             )
           }
         >
-          <option value="first-imported-note">First imported note</option>
-          <option value="last-imported-note">Last imported note</option>
-          <option value="all-imported-notes">All imported notes</option>
+          <option value="first-imported-note">{t('settings.whichNotes.first')}</option>
+          <option value="last-imported-note">{t('settings.whichNotes.last')}</option>
+          <option value="all-imported-notes">{t('settings.whichNotes.all')}</option>
         </select>
       </SettingItem>
       <SettingItem
-        name="Enable Annotation Concatenation"
-        description="Annotations extracted from PDFs that begin with '+' will be appended to the previous annotation. Note: Annotation ordering is not always consistent and you may not always acheive the desire concatenation result"
+        name={t('settings.concat')}
+        description={t('settings.concat.desc')}
       >
         <div
           onClick={() => {
@@ -222,10 +254,10 @@ function SettingsComponent({
           className={`checkbox-container${concat ? ' is-enabled' : ''}`}
         />
       </SettingItem>
-      <SettingItem name="Citation Formats" isHeading />
+      <SettingItem name={t('settings.citeFormats')} isHeading />
       <SettingItem>
         <button onClick={addCite} className="mod-cta">
-          Add Citation Format
+          {t('settings.addCiteFormat')}
         </button>
       </SettingItem>
       {citeFormatState.map((f, i) => {
@@ -240,10 +272,10 @@ function SettingsComponent({
         );
       })}
 
-      <SettingItem name="Import Formats" isHeading />
+      <SettingItem name={t('settings.importFormats')} isHeading />
       <SettingItem>
         <button onClick={addExport} className="mod-cta">
-          Add Import Format
+          {t('settings.addImportFormat')}
         </button>
       </SettingItem>
       {exportFormatState.map((f, i) => {
@@ -259,11 +291,11 @@ function SettingsComponent({
       })}
 
       <SettingItem
-        name="Import Image Settings"
-        description="Rectangle annotations will be extracted from PDFs as images."
+        name={t('settings.imageSettings')}
+        description={t('settings.imageSettings.desc')}
         isHeading
       />
-      <SettingItem name="Image Format">
+      <SettingItem name={t('settings.imageFormat')}>
         <select
           className="dropdown"
           defaultValue={settings.pdfExportImageFormat}
@@ -278,7 +310,7 @@ function SettingsComponent({
           <option value="png">png</option>
         </select>
       </SettingItem>
-      <SettingItem name="Image Quality (jpg only)">
+      <SettingItem name={t('settings.imageQuality')}>
         <input
           min="0"
           max="100"
@@ -292,7 +324,7 @@ function SettingsComponent({
           defaultValue={settings.pdfExportImageQuality.toString()}
         />
       </SettingItem>
-      <SettingItem name="Image DPI">
+      <SettingItem name={t('settings.imageDPI')}>
         <input
           min="0"
           onChange={(e) =>
@@ -306,11 +338,10 @@ function SettingsComponent({
         />
       </SettingItem>
       <SettingItem
-        name="Image OCR"
+        name={t('settings.imageOCR')}
         description={
           <div>
-            Attempt to extract text from images created by rectangle
-            annotations. This requires that{' '}
+            {t('settings.imageOCR.desc.line1')}{' '}
             <a
               href="https://tesseract-ocr.github.io/tessdoc/"
               target="_blank"
@@ -318,17 +349,17 @@ function SettingsComponent({
             >
               tesseract
             </a>{' '}
-            be installed on your system. Tesseract can be installed from
+            {t('settings.imageOCR.desc.line2')}{' '}
             <a href="https://brew.sh/" target="_blank" rel="noreferrer">
-              homebrew on mac
+              {t('settings.imageOCR.desc.line3')}
             </a>
-            , various linux package managers, and from{' '}
+            {t('settings.imageOCR.desc.line4')}{' '}
             <a
               href="https://github.com/UB-Mannheim/tesseract/wiki"
               target="_blank"
               rel="noreferrer"
             >
-              here on windows
+              {t('settings.imageOCR.desc.line5')}
             </a>
             .
           </div>
@@ -345,11 +376,10 @@ function SettingsComponent({
         />
       </SettingItem>
       <SettingItem
-        name="Tesseract path"
+        name={t('settings.imageOCR.tesseractPath')}
         description={
           <div>
-            Required: An absolute path to the tesseract executable. This can be
-            found on mac and linux with the terminal command{' '}
+            {t('settings.imageOCR.tesseractPath.desc1')}{' '}
             <pre>which tesseract</pre>
           </div>
         }
@@ -367,7 +397,7 @@ function SettingsComponent({
         />
         <div
           className="clickable-icon setting-editor-extra-setting-button"
-          aria-label="Attempt to find tesseract automatically"
+          aria-label={t('settings.pdfUtility.findTesseract')}
           onClick={async () => {
             try {
               const pathToTesseract = await which('tesseract');
@@ -375,14 +405,10 @@ function SettingsComponent({
                 tessPathRef.current.value = pathToTesseract;
                 updateSetting('pdfExportImageTesseractPath', pathToTesseract);
               } else {
-                new Notice(
-                  'Unable to find tesseract on your system. If it is installed, please manually enter a path.'
-                );
+                new Notice(t('settings.pdfUtility.findTesseract.fail'));
               }
             } catch (e) {
-              new Notice(
-                'Unable to find tesseract on your system. If it is installed, please manually enter a path.'
-              );
+              new Notice(t('settings.pdfUtility.findTesseract.fail'));
               console.error(e);
             }
           }}
@@ -391,26 +417,24 @@ function SettingsComponent({
         </div>
       </SettingItem>
       <SettingItem
-        name="Image OCR Language"
+        name={t('settings.imageOCR.lang')}
         description={
           <div>
-            Optional: defaults to english. Multiple languages can be specified
-            like so: <pre>eng+deu</pre>. Each language must be installed on your
-            system.{' '}
+            {t('settings.imageOCR.lang.desc1')} <pre>eng+deu</pre>. {t('settings.imageOCR.lang.desc2')}{' '}
             <a
               href="https://github.com/tesseract-ocr/tessdata"
               target="_blank"
               rel="noreferrer"
             >
-              Languages can be downloaded here
+              {t('settings.imageOCR.lang.desc3')}
             </a>
-            . (See{' '}
+            . ({' '}
             <a
               href="https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html"
               target="_blank"
               rel="noreferrer"
             >
-              here for a description of the language codes
+              {t('settings.imageOCR.lang.desc4')}
             </a>
             )
           </div>
@@ -428,8 +452,8 @@ function SettingsComponent({
         />
       </SettingItem>
       <SettingItem
-        name="Tesseract data directory"
-        description="Optional: supply an absolute path to the directory where tesseract's language files reside. This folder should include *.traineddata files for your selected languages."
+        name={t('settings.imageOCR.tessDataDir')}
+        description={t('settings.imageOCR.tessDataDir.desc')}
       >
         <input
           ref={tessDataPathRef}
@@ -444,7 +468,7 @@ function SettingsComponent({
         />
         <div
           className="clickable-icon setting-editor-extra-setting-button"
-          aria-label="Select the tesseract data directory"
+          aria-label={t('settings.pdfUtility.selectTessDataDir')}
           onClick={() => {
             const path = require('electron').remote.dialog.showOpenDialogSync({
               properties: ['openDirectory'],

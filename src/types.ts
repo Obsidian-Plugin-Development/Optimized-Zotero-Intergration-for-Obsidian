@@ -79,6 +79,7 @@ export interface ZoteroConnectorSettings {
   _exeInternalVersion?: number;
   exeOverridePath?: string;
   exportFormats: ExportFormat[];
+  locale?: 'en' | 'zh-cn';
   noteImportFolder: string;
   openNoteAfterImport: boolean;
   pdfExportImageDPI?: number;

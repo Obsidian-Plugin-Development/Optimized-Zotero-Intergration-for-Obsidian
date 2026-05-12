@@ -3,6 +3,7 @@ import { TFile } from 'obsidian';
 import React from 'react';
 import { StylesConfig } from 'react-select';
 
+import { t } from '../locale/i18n';
 import { cslList } from './cslList';
 
 export const customSelectStyles: StylesConfig = {
@@ -80,11 +81,11 @@ export function loadCSLOptions(
 }
 
 export function NoOptionMessage() {
-  return <span>Type to search CSL styles</span>;
+  return <span>{t('export.cslSearch')}</span>;
 }
 
 export function NoFileOptionMessage() {
-  return <span>Type to search</span>;
+  return <span>{t('export.fileSearch')}</span>;
 }
 
 export function buildFileSearch() {
