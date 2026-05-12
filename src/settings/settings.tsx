@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, debounce } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, debounce } from 'obsidian';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import which from 'which';
@@ -10,9 +10,11 @@ import {
   setLocale,
   t,
 } from '../locale/i18n';
+import { createIfRule } from '../bbt/styleManager';
 import {
   CitationFormat,
   ExportFormat,
+  IfColorRule,
   ZoteroConnectorSettings,
 } from '../types';
 import { AssetDownloader } from './AssetDownloader';
@@ -510,6 +512,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
       />,
       this.containerEl
     );
+    this.renderIfColorRules();
   }
 
   addCiteFormat = (format: CitationFormat) => {
@@ -569,6 +572,127 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     this.plugin.settings[key] = value;
     this.debouncedSave();
   };
+
+  renderIfColorRules() {
+    const existing = this.containerEl.querySelector(
+      '#zotero-if-rules-container'
+    );
+    if (existing) existing.remove();
+
+    const container = document.createElement('div');
+    container.id = 'zotero-if-rules-container';
+    this.containerEl.appendChild(container);
+
+    // Heading
+    new Setting(container)
+      .setName(t('settings.ifColorRules'))
+      .setDesc(t('settings.ifColorRules.desc'))
+      .setHeading();
+
+    // Add rule button
+    new Setting(container).addButton((btn) =>
+      btn
+        .setButtonText(t('settings.ifColorRules.add'))
+        .setCta()
+        .onClick(() => {
+          const rules = [...(this.plugin.settings.ifColorRules || [])];
+          rules.push(createIfRule(rules.length));
+          this.plugin.settings.ifColorRules = rules;
+          this.debouncedSave();
+          this.renderIfColorRules();
+        })
+    );
+
+    const rules = this.plugin.settings.ifColorRules || [];
+    if (!rules.length) return;
+
+    rules.forEach((rule, i) => {
+      const updateRule = (patch: Partial<IfColorRule>) => {
+        const updated = [...(this.plugin.settings.ifColorRules || [])];
+        updated[i] = { ...updated[i], ...patch };
+        // 重新生成 className（基于索引）
+        updated[i].className = `if-dynamic-${i}`;
+        this.plugin.settings.ifColorRules = updated;
+        this.debouncedSave();
+      };
+
+      const ruleSetting = new Setting(container)
+        .setName(
+          createFragment((f) => {
+            f.createSpan({
+              text: `Rule ${i + 1}`,
+              cls: 'setting-item-name',
+            });
+            // 预览标签
+            const preview = f.createSpan({
+              text: ` IF ${rule.min}~${rule.max ?? '∞'} `,
+              cls: 'zt-if-preview-pill',
+            });
+            preview.style.backgroundColor = rule.bgColor;
+            preview.style.color = rule.textColor;
+            preview.style.border = `1px solid ${rule.borderColor}`;
+            preview.style.padding = '2px 8px';
+            preview.style.borderRadius = '12px';
+            preview.style.fontSize = '0.85em';
+            preview.style.marginLeft = '8px';
+          })
+        )
+        .addText((text) =>
+          text
+            .setValue(rule.min.toString())
+            .setPlaceholder(t('settings.ifColorRules.min'))
+            .onChange((value) => updateRule({ min: parseFloat(value) || 0 }))
+        )
+        .addText((text) =>
+          text
+            .setValue(rule.max?.toString() || '')
+            .setPlaceholder(t('settings.ifColorRules.max'))
+            .onChange((value) =>
+              updateRule({ max: value ? parseFloat(value) : null })
+            )
+        )
+        .addColorPicker((picker) =>
+          picker.setValue(rule.bgColor).onChange((value) => {
+            updateRule({ bgColor: value });
+            this.renderIfColorRules();
+          })
+        )
+        .addColorPicker((picker) =>
+          picker.setValue(rule.textColor).onChange((value) => {
+            updateRule({ textColor: value });
+            this.renderIfColorRules();
+          })
+        )
+        .addColorPicker((picker) =>
+          picker.setValue(rule.borderColor).onChange((value) => {
+            updateRule({ borderColor: value });
+            this.renderIfColorRules();
+          })
+        )
+        .addExtraButton((btn) =>
+          btn
+            .setIcon('trash')
+            .setTooltip(t('settings.ifColorRules.delete'))
+            .onClick(() => {
+              const updated = [
+                ...(this.plugin.settings.ifColorRules || []),
+              ];
+              updated.splice(i, 1);
+              // 重新索引 className
+              updated.forEach((r, idx) => (r.className = `if-dynamic-${idx}`));
+              this.plugin.settings.ifColorRules = updated;
+              this.debouncedSave();
+              this.renderIfColorRules();
+            })
+        );
+
+      // 为输入框设置宽度
+      const inputs = ruleSetting.controlEl.querySelectorAll('input[type="text"], input[type="number"]');
+      inputs.forEach((inp: HTMLInputElement) => {
+        inp.style.width = '80px';
+      });
+    });
+  }
 
   debouncedSave() {
     clearTimeout(this.dbTimer);

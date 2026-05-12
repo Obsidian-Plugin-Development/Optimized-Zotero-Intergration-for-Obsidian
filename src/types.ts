@@ -70,6 +70,16 @@ export interface RenderCiteTemplateParams {
   format: CitationFormat;
 }
 
+export interface IfColorRule {
+  id: string;
+  min: number;
+  max: number | null;
+  bgColor: string;
+  textColor: string;
+  borderColor: string;
+  className: string;
+}
+
 export interface ZoteroConnectorSettings {
   citeFormats: CitationFormat[];
   citeSuggestTemplate?: string;
@@ -80,6 +90,7 @@ export interface ZoteroConnectorSettings {
   exeOverridePath?: string;
   exportFormats: ExportFormat[];
   locale?: 'en' | 'zh-cn';
+  ifColorRules?: IfColorRule[];
   noteImportFolder: string;
   openNoteAfterImport: boolean;
   pdfExportImageDPI?: number;

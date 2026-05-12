@@ -221,6 +221,18 @@ const en: StringMap = {
   'error.parsingTemplate': 'Error parsing template "%s":',
   'error.cannotFindFile': 'Cannot find file. Invalid markdown link:',
   'error.fileNotFound': 'Cannot find file. File not found:',
+
+  // ── 影响因子颜色配置 ──
+  'settings.ifColorRules': 'Impact Factor Color Configuration',
+  'settings.ifColorRules.desc':
+    'Dynamically color IF values in the Properties panel based on value ranges.',
+  'settings.ifColorRules.add': 'Add Rule',
+  'settings.ifColorRules.min': 'Min IF',
+  'settings.ifColorRules.max': 'Max IF (empty = ∞)',
+  'settings.ifColorRules.bgColor': 'Background',
+  'settings.ifColorRules.textColor': 'Text Color',
+  'settings.ifColorRules.delete': 'Delete',
+  'settings.ifColorRules.preview': 'Preview',
 };
 
 const zhCN: StringMap = {
@@ -408,6 +420,18 @@ const zhCN: StringMap = {
   'error.parsingTemplate': '解析模板 "%s" 时出错：',
   'error.cannotFindFile': '找不到文件。无效的 Markdown 链接：',
   'error.fileNotFound': '找不到文件。文件不存在：',
+
+  // ── 影响因子颜色配置 ──
+  'settings.ifColorRules': '影响因子颜色配置',
+  'settings.ifColorRules.desc':
+    '根据影响因子数值范围，在属性面板中为 IF 标签动态着色。',
+  'settings.ifColorRules.add': '添加规则',
+  'settings.ifColorRules.min': '最小值',
+  'settings.ifColorRules.max': '最大值（留空为无穷大）',
+  'settings.ifColorRules.bgColor': '背景色',
+  'settings.ifColorRules.textColor': '字体色',
+  'settings.ifColorRules.delete': '删除',
+  'settings.ifColorRules.preview': '预览',
 };
 
 // ─── 翻译函数 ─────────────────────────────────────────────────────

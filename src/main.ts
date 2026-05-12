@@ -5,6 +5,7 @@ import { shellPath } from 'shell-path';
 import { DataExplorerView, viewType } from './DataExplorerView';
 import { LoadingModal } from './bbt/LoadingModal';
 import { getCAYW } from './bbt/cayw';
+import { injectIfStyles, removeIfStyles } from './bbt/styleManager';
 import { exportToMarkdown, renderCiteTemplate } from './bbt/export';
 import {
   filesFromNotes,
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   citeFormats: [],
   exportFormats: [],
   citeSuggestTemplate: '[[{{citekey}}]]',
+  ifColorRules: [],
   openNoteAfterImport: false,
   whichNotesToOpenAfterImport: 'first-imported-note',
 };
@@ -73,6 +75,12 @@ export default class ZoteroConnector extends Plugin {
     await this.loadSettings();
     setLocale(this.settings.locale || 'en');
     this.emitter = new Events();
+
+    // 注入 IF 动态样式
+    injectIfStyles(this.settings.ifColorRules || []);
+    this.emitter.on('settingsUpdated', () => {
+      injectIfStyles(this.settings.ifColorRules || []);
+    });
 
     this.updatePDFUtility();
     this.addSettingTab(new ZoteroConnectorSettingsTab(this.app, this));
@@ -154,6 +162,7 @@ export default class ZoteroConnector extends Plugin {
       this.removeExportCommand(f);
     });
 
+    removeIfStyles();
     this.app.workspace.detachLeavesOfType(viewType);
   }
 

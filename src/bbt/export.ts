@@ -7,6 +7,7 @@ import { doesEXEExist, getVaultRoot } from '../helpers';
 import {
   DatabaseWithPort,
   ExportToMarkdownParams,
+  IfColorRule,
   RenderCiteTemplateParams,
   ZoteroConnectorSettings,
 } from '../types';
@@ -29,6 +30,7 @@ import {
   getItemJSONFromRelations,
 } from './jsonRPC';
 import { mergeFrontmatterContent } from './frontmatter';
+import { extractImpactFactor, matchIfRule } from './styleManager';
 import { PersistExtension, renderTemplate } from './template.env';
 import {
   appendExportDate,
@@ -579,7 +581,8 @@ async function getAttachmentData(item: any, database: DatabaseWithPort) {
 async function getTemplateData(
   markdownPath: string,
   item: any,
-  lastImportDate: moment.Moment
+  lastImportDate: moment.Moment,
+  ifColorRules?: IfColorRule[]
 ) {
   const firstAnnots = item.attachments.find(
     (a: any) => a.annotations?.length
@@ -589,6 +592,16 @@ async function getTemplateData(
   item.lastImportDate = lastImportDate;
   item.lastExportDate = lastImportDate;
   item.isFirstImport = lastImportDate.valueOf() === 0;
+
+  // IF 提取与规则匹配
+  if (ifColorRules?.length) {
+    const ifValue = extractImpactFactor(item.libraryCatalog);
+    const matchedRule = matchIfRule(ifValue, ifColorRules);
+    if (matchedRule) {
+      item.ifColorClass = matchedRule.className;
+      item.ifValue = ifValue;
+    }
+  }
 
   return await applyBasicTemplates(markdownPath, item);
 }
@@ -802,7 +815,8 @@ export async function exportToMarkdown(
       const templateData = await getTemplateData(
         markdownPath,
         item,
-        lastImportDate
+        lastImportDate,
+        settings.ifColorRules
       );
       const rendered = await renderTemplates(
         params,
@@ -977,7 +991,7 @@ export async function dataExplorerPrompt(settings: ZoteroConnectorSettings) {
 
   await Promise.all(
     itemData.map(async (data: any) => {
-      await getTemplateData('', data, moment(0));
+      await getTemplateData('', data, moment(0), settings.ifColorRules);
     })
   );
 
