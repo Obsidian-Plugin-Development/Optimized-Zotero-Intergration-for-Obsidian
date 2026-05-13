@@ -236,3 +236,35 @@
     box-shadow: 0 1em 0 0;
   }
 }
+
+/* ========================================
+   属性映射卡片样式 (v2.1.0)
+   ======================================== */
+
+/* 卡片容器 */
+.zt-setting-card-group {
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 0 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* 卡片内的设置项 */
+.zt-setting-card-group .setting-item {
+    border-top: none;
+    border-bottom: 1px solid var(--background-modifier-border-hover);
+    padding: 18px 0;
+}
+
+/* 最后一项不显示底部边框 */
+.zt-setting-card-group .setting-item:last-child {
+    border-bottom: none;
+}
+
+/* 拖拽状态（预留） */
+.zt-setting-card-group .setting-item.is-dragging {
+    opacity: 0.4;
+    background-color: var(--background-secondary);
+}
