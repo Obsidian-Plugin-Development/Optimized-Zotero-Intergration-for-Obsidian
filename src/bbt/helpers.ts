@@ -32,11 +32,11 @@ export function replaceIllegalChars(str: string) {
 }
 
 export function sanitizeFilePath(filePath: string) {
-  const parsed = path.parse(filePath);
+  const parsed = path.posix.parse(filePath);
   const dir = replaceIllegalChars(parsed.dir);
   const name = replaceIllegalChars(parsed.name);
 
-  return path.join(dir, `${name}${parsed.ext}`);
+  return path.posix.join(dir, `${name}${parsed.ext}`);
 }
 
 function hexToHSL(str: string) {

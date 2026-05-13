@@ -177,7 +177,11 @@ export class PersistExtension implements Extension {
     }
 
     let trimmed = body() as string;
-    if (retained) trimmed = trimmed.trimStart();
+    // Only trim the first newline if there's retained content
+    // This preserves intentional blank lines in the template
+    if (retained && trimmed.startsWith('\n')) {
+      trimmed = trimmed.slice(1);
+    }
 
     return new nunjucks.runtime.SafeString(
       `%% begin ${id} %%${retained}${trimmed}%% end ${id} %%`
@@ -194,6 +198,7 @@ export class PersistExtension implements Extension {
 
     const matches = md.matchAll(/%% begin (.+?) %%([\w\W]*?)%% end \1 %%/gi);
     for (const match of matches) {
+      // Store the content as-is, preserving all whitespace
       out[match[1]] = match[2];
     }
 
