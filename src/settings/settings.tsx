@@ -644,7 +644,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     const existing = container.querySelector('#zotero-property-mappings-container');
     if (existing) existing.remove();
 
-    const wrapper = container.createDiv('zotero-property-mappings-container');
+    const wrapper = container.createDiv('zotero-property-mappings-container zt-setting-card-group');
     wrapper.id = 'zotero-property-mappings-container';
 
     new Setting(wrapper)
