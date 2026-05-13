@@ -7,9 +7,6 @@ export const SMART_FIELD_OPTIONS: SmartFieldOption[] = [
   { value: 'title_smart', label: '标题 (包含超链接)' },
   { value: 'authors_smart', label: '作者 (智能处理 et al. 与通讯)' },
   { value: 'year', label: '日期 (提取年份)' },
-  { value: 'journal', label: '出版物' },
-  { value: 'journal_platform_smart', label: '期刊/平台 (智能兼容预印本)' },
-  { value: 'publisher_smart', label: '出版社 (兼容预印本)' },
   { value: 'collections_path', label: '文库和分类 (多级路径)' },
   { value: 'impact_factor_smart', label: '文库编目 (提取 IF 值)' },
   { value: 'type_tags_smart', label: '标签：文献类型 (#)' },
@@ -76,24 +73,6 @@ function extractYear(item: any): string {
     return item.date.format('YYYY');
   }
   return '';
-}
-
-function extractJournal(item: any): string {
-  return item.publicationTitle || '';
-}
-
-function extractJournalPlatformSmart(item: any): string {
-  const pubTitle = item.publicationTitle;
-  if (pubTitle) {
-    const abbr = item.journalAbbreviation;
-    return abbr ? `${pubTitle} (${abbr})` : pubTitle;
-  }
-  // 预印本 / 技术报告回退降级
-  return item.repository || item.publisher || item.institution || '';
-}
-
-function extractPublisherSmart(item: any): string {
-  return item.publisher || item.repository || item.institution || '';
 }
 
 function extractCollectionsPath(item: any): string[] {
@@ -165,9 +144,6 @@ const extractorMap: Record<string, (item: any) => any> = {
   title_smart: extractTitleSmart,
   authors_smart: extractAuthorsSmart,
   year: extractYear,
-  journal: extractJournal,
-  journal_platform_smart: extractJournalPlatformSmart,
-  publisher_smart: extractPublisherSmart,
   collections_path: extractCollectionsPath,
   impact_factor_smart: extractImpactFactorSmart,
   type_tags_smart: extractTypeTagsSmart,
