@@ -5,11 +5,13 @@ import path from 'path';
 import { t } from '../locale/i18n';
 import { doesEXEExist, getVaultRoot } from '../helpers';
 import {
+  CustomProperty,
   DatabaseWithPort,
   ExportToMarkdownParams,
   IfColorRule,
   ImportProgress,
   ProgressCallback,
+  PropertyItem,
   PropertyMapping,
   RenderCiteTemplateParams,
   ZoteroConnectorSettings,
@@ -21,8 +23,10 @@ import { extractAnnotations } from './extractAnnotations';
 import {
   ensureFolderExists,
   getColorCategory,
+  getCustomProperties,
   getLocalURI,
   getPrimaryPath,
+  getZoteroMappings,
   mkMDDir,
   sanitizeFilePath,
 } from './helpers';
@@ -51,6 +55,66 @@ import {
 // ═══════════════════════════════════════════════
 // v4.0 非破坏性同步 - 边界标记与安全合并
 // ═══════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════
+// v5.0 自定义属性默认值 - 类型 → 空值映射
+// ═══════════════════════════════════════════════
+
+/**
+ * 获取自定义属性的默认空值（YAML 格式化的字符串）。
+ * 用于新笔记首次创建时注入预设属性。
+ */
+function getCustomPropertyDefault(cp: CustomProperty): string {
+  // v5.1: 优先使用用户指定的默认值
+  if (cp.value !== undefined && cp.value !== '') return cp.value;
+
+  switch (cp.type) {
+    case 'text':
+      return "''";
+    case 'list':
+      return '[]';
+    case 'number':
+      return '0';
+    case 'checkbox':
+      return 'false';
+    case 'date':
+      return "''";
+    default:
+      return "''";
+  }
+}
+
+/**
+ * v5.0 安全注入：将自定义属性及其默认值追加到 YAML 块末尾。
+ * 仅在新建文件时调用，更新时绝不触碰。
+ */
+function injectCustomPropertiesIntoYaml(
+  yamlBlock: string,
+  customProperties: CustomProperty[]
+): string {
+  if (!customProperties?.length) return yamlBlock;
+
+  // 跳过已在 YAML 中存在的 key（v5.2: buildPropertyRecord 现在已包含自定义属性）
+  const existingKeys = new Set(
+    yamlBlock.split('\n')
+      .map(line => line.split(':')[0]?.trim())
+      .filter(Boolean)
+  );
+  const extraLines = customProperties
+    .filter(cp => !existingKeys.has(cp.key))
+    .map(cp => `${cp.key}: ${getCustomPropertyDefault(cp)}`);
+  if (!extraLines.length) return yamlBlock;
+  return yamlBlock + '\n' + extraLines.join('\n');
+}
+
+/**
+ * v5.0 安全门：从 Zotero 映射中提取受保护的 key 集合。
+ * 增量更新时，只允许修改这些 key，其他任何 YAML 字段绝对禁止触碰。
+ */
+function getMappedObsidianKeys(mappings?: PropertyMapping[]): Set<string> {
+  if (!mappings?.length) return new Set<string>();
+  return new Set(mappings.map((m) => m.obsidianKey).filter(Boolean));
+}
 
 /** Zotero 内容区域起始标记 */
 const ZOTERO_START = '%% Zotero_Notes_Start %%';
@@ -480,7 +544,7 @@ export async function renderTemplates(
 
   // v2.0 新引擎：无 Nunjucks 模板但配置了属性映射时，使用可视化映射生成 YAML
   if (!template && !headerTemplate && !annotationTemplate && !footerTemplate) {
-    if (settings.propertyMappings?.length) {
+    if (settings.propertyItems?.length) {
       const record = templateData._propertyRecord || {};
       const rendered = assembleMarkdown(record, settings.bodyTemplate || '');
       return rendered;
@@ -663,7 +727,7 @@ async function getTemplateData(
   item: any,
   lastImportDate: moment.Moment,
   ifColorRules?: IfColorRule[],
-  propertyMappings?: PropertyMapping[]
+  propertyItems?: PropertyItem[]
 ) {
   const firstAnnots = item.attachments.find(
     (a: any) => a.annotations?.length
@@ -685,8 +749,8 @@ async function getTemplateData(
   }
 
   // 构建属性映射 Record（v2.0 新引擎）
-  if (propertyMappings?.length) {
-    item._propertyRecord = buildPropertyRecord(item, propertyMappings, ifColorRules);
+  if (propertyItems?.length) {
+    item._propertyRecord = buildPropertyRecord(item, propertyItems, ifColorRules);
   }
 
   return await applyBasicTemplates(markdownPath, item);
@@ -959,7 +1023,7 @@ export async function exportToMarkdown(
         item,
         lastImportDate,
         settings.ifColorRules,
-        settings.propertyMappings
+        settings.propertyItems
       );
       const rendered = await renderTemplates(
         params,
@@ -977,15 +1041,19 @@ export async function exportToMarkdown(
         const updateBody = syncMode === 'full' || syncMode === 'annotations';
 
         if (updateYaml) {
-          // ── v4.0 非破坏性 YAML 更新 ──
-          // 使用 processFrontMatter 安全更新 YAML 属性
-          // Obsidian 原生 API：只修改 frontmatter 区域，不动正文
+          // ── v5.0 绝对安全 YAML 更新 ──
+          // 安全门：只修改 Zotero 映射字段，绝不触碰用户自定义属性
           const renderedYaml = extractFrontmatterBlock(rendered);
           if (renderedYaml) {
             const renderedFm = parseYaml(renderedYaml) || {};
+            const allowedKeys = getMappedObsidianKeys(getZoteroMappings(settings.propertyItems || []));
+            // 只过滤，不过滤掉 cssclasses 等系统键
             await app.fileManager.processFrontMatter(file, (fm: any) => {
               for (const [key, value] of Object.entries(renderedFm)) {
-                fm[key] = value;
+                // 安全门：只写入 Zotero 映射的 key（+ cssclasses 系统字段）
+                if (key === 'cssclasses' || allowedKeys.has(key)) {
+                  fm[key] = value;
+                }
               }
             });
           }
@@ -1026,8 +1094,26 @@ export async function exportToMarkdown(
               wrapZoteroSection(renderedBody)
             );
 
+        // ── v5.0 注入自定义属性默认值 ──
+        // 仅在新文件首次创建时写入空值，后续更新绝不触碰
+        let finalContent = safeContent;
+        const customProps = getCustomProperties(settings.propertyItems || []);
+        if (customProps.length) {
+          const fm = extractFrontmatterBlock(safeContent);
+          if (fm) {
+            const augmentedFm = injectCustomPropertiesIntoYaml(
+              fm,
+              customProps
+            );
+            finalContent = safeContent.replace(
+              `---\n${fm}\n---`,
+              `---\n${augmentedFm}\n---`
+            );
+          }
+        }
+
         await ensureFolderExists(app.vault, path.posix.dirname(finalPath));
-        await app.vault.create(finalPath, safeContent);
+        await app.vault.create(finalPath, finalContent);
         createdOrUpdatedMarkdownFiles.push(finalPath);
       }
     } catch (e) {

@@ -1,5 +1,5 @@
 import path from 'path';
-import { Database } from 'src/types';
+import { CustomProperty, Database, PropertyItem, PropertyMapping } from '../types';
 
 export const defaultHeaders = {
   'Content-Type': 'application/json',
@@ -220,4 +220,22 @@ export function getLocalURI(
   }
 
   return url;
+}
+
+/**
+ * 从统一属性列表中提取 Zotero 字段映射（供下游代码使用）。
+ */
+export function getZoteroMappings(items: PropertyItem[]): PropertyMapping[] {
+  return items
+    .filter(item => item.kind === 'zotero' && item.zoteroField)
+    .map(item => ({ zoteroField: item.zoteroField!, obsidianKey: item.obsidianKey }));
+}
+
+/**
+ * 从统一属性列表中提取用户自定义属性（供下游代码使用）。
+ */
+export function getCustomProperties(items: PropertyItem[]): CustomProperty[] {
+  return items
+    .filter(item => item.kind === 'custom')
+    .map(item => ({ key: item.obsidianKey, type: item.customType || 'text', value: item.customValue }));
 }

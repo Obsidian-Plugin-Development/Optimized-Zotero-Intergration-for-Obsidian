@@ -270,6 +270,7 @@ const en: StringMap = {
   'settings.tab.metadata': 'Metadata Mapping',
   'settings.tab.notes': 'Notes Template',
   'settings.tab.citation': 'Citation Format',
+  'settings.tab.sync': 'Sync Float',
 
   // ── System Header ──
   'settings.system': 'System Settings',
@@ -279,6 +280,33 @@ const en: StringMap = {
   'settings.metadata.propertyMappings': 'Property Mappings',
   'settings.metadata.propertyMappings.desc':
     'Map Zotero fields to Obsidian YAML properties. Drag ⋮⋮ to reorder. These become the frontmatter of each imported note.',
+  'settings.metadata.customProperties': 'Custom Properties',
+  'settings.metadata.customProperties.desc':
+    'Define extra Obsidian-native property presets with default values. Added to new notes but never overwritten during incremental updates.',
+  'settings.metadata.propertyItems': 'Property Items',
+  'settings.metadata.propertyItems.desc':
+    'Unified list of Zotero field mappings and custom properties. Drag ⋮⋮ to reorder. Choose the type for each row.',
+  'settings.metadata.propertyItems.empty': 'No properties defined yet',
+  'settings.metadata.propertyItems.add': 'Add Property',
+  'settings.metadata.propertyItems.addZotero': 'Add Zotero Field',
+  'settings.metadata.propertyItems.addCustom': 'Add Custom Property',
+  'settings.metadata.propertyItems.kind': 'Type',
+  'settings.metadata.propertyItems.kindZotero': 'Zotero Field',
+  'settings.metadata.propertyItems.kindCustom': 'Custom',
+  'settings.metadata.customProperties.key': 'Name',
+  'settings.metadata.customProperties.value': 'Default Value',
+  'settings.metadata.triggerFeatureKey': 'Floating Button Trigger Key',
+  'settings.metadata.triggerFeatureValue': 'Floating Button Trigger Value',
+  'settings.metadata.triggerFeatureKey.desc':
+    'The floating sync button only appears when the current note YAML contains this key (default: Title).',
+  'settings.metadata.triggerFeatureValue.desc':
+    'Optional: If set, the YAML value for the above key must also match this value. Leave empty to match any value.',
+  'settings.metadata.floatingButtonCommands': 'Floating Button Commands',
+  'settings.metadata.floatingButtonCommands.desc':
+    'Select which commands appear in the popup menu when you click the floating button.',
+  'settings.metadata.floatingButtonCommands.noCommands':
+    'No commands selected. The floating button will not respond to clicks.',
+
 
   // ── Notes Tab ──
   'settings.notes.bodyTemplate': 'Body Template',
@@ -541,6 +569,7 @@ const zhCN: StringMap = {
   'settings.tab.metadata': '元数据映射',
   'settings.tab.notes': '笔记模板',
   'settings.tab.citation': '引注格式',
+  'settings.tab.sync': '同步悬浮',
 
   // ── System Header ──
   'settings.system': '系统设置',
@@ -550,6 +579,33 @@ const zhCN: StringMap = {
   'settings.metadata.propertyMappings': '属性映射',
   'settings.metadata.propertyMappings.desc':
     '将 Zotero 字段映射到 Obsidian YAML 属性。拖拽 ⋮⋮ 排序。这些映射会成为每篇导入笔记的 frontmatter。',
+  'settings.metadata.customProperties': '本地自定义属性',
+  'settings.metadata.customProperties.desc':
+    '定义专属 Obsidian 的静态属性及默认值。新建笔记时自动写入，增量更新时绝不覆盖。',
+  'settings.metadata.propertyItems': '属性列表',
+  'settings.metadata.propertyItems.desc':
+    'Zotero 字段映射与自定义属性的统一列表。拖拽 ⋮⋮ 排序，通过类型选择器切换每行的属性种类。',
+  'settings.metadata.propertyItems.empty': '尚未添加属性',
+  'settings.metadata.propertyItems.add': '添加属性',
+  'settings.metadata.propertyItems.addZotero': '添加 Zotero 字段',
+  'settings.metadata.propertyItems.addCustom': '添加自定义属性',
+  'settings.metadata.propertyItems.kind': '类型',
+  'settings.metadata.propertyItems.kindZotero': 'Zotero 字段',
+  'settings.metadata.propertyItems.kindCustom': '自定义',
+  'settings.metadata.customProperties.key': '属性名',
+  'settings.metadata.customProperties.value': '默认值',
+  'settings.metadata.triggerFeatureKey': '悬浮球触发特征键',
+  'settings.metadata.triggerFeatureKey.desc':
+    '仅当当前笔记的 YAML 中包含此键时，才判定为文献笔记并显示悬浮同步球。默认：文献标题。',
+  'settings.metadata.triggerFeatureValue': '悬浮球触发特征值',
+  'settings.metadata.triggerFeatureValue.desc':
+    '可选：设置后，YAML 中对应键的值必须与此值匹配才触发悬浮球。留空则匹配任意值。',
+  'settings.metadata.floatingButtonCommands': '悬浮球触发命令',
+  'settings.metadata.floatingButtonCommands.desc':
+    '选择点击悬浮球后弹出菜单中显示的命令。',
+  'settings.metadata.floatingButtonCommands.noCommands':
+    '未选择任何命令，点击悬浮球将无反应。',
+
 
   // ── Notes Tab ──
   'settings.notes.bodyTemplate': '正文模板',

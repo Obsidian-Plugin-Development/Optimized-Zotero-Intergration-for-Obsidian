@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "4.0.1",
+	"version": "5.0.0",
 	"minAppVersion": "1.1.1",
-	"description": "v4.0.0: 元数据/笔记/参考文献三路解耦导入 + 作者属性列表化（第一作者† / 通讯作者✉ / et al.）",
+	"description": "v5.0.0: 统一属性列表重构 — Zotero字段映射与自定义属性合并管理，支持类型解析与混合排序",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

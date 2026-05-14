@@ -15,11 +15,12 @@ import {
   injectTitleMarqueeStyles,
 } from '../bbt/styleManager';
 import { SMART_FIELD_OPTIONS } from '../bbt/smartExtractors';
+import { getZoteroMappings, getCustomProperties } from '../bbt/helpers';
 import {
   CitationFormat,
   ExportFormat,
   IfColorRule,
-  PropertyMapping,
+  PropertyItem,
   ZoteroConnectorSettings,
 } from '../types';
 import { AssetDownloader } from './AssetDownloader';
@@ -31,9 +32,10 @@ import { SettingItem } from './SettingItem';
 // ── Types ──
 
 /** v4.0: 3 个面向工作流的清晰标签页 */
-type TabId = 'metadata' | 'notes' | 'citation';
+type TabId = 'metadata' | 'notes' | 'citation' | 'sync';
 
 const TAB_ITEMS: { id: TabId; labelKey: string }[] = [
+  { id: 'sync', labelKey: 'settings.tab.sync' },
   { id: 'metadata', labelKey: 'settings.tab.metadata' },
   { id: 'notes', labelKey: 'settings.tab.notes' },
   { id: 'citation', labelKey: 'settings.tab.citation' },
@@ -422,12 +424,13 @@ function CitationTab({
 export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   plugin: ZoteroConnector;
   dbTimer: number;
-  activeTab: TabId = 'metadata';
+  activeTab: TabId = 'sync';
   private systemHeader: HTMLElement | null = null;
   private tabButtons: HTMLElement | null = null;
   private metadataContainer: HTMLElement | null = null;
   private notesContainer: HTMLElement | null = null;
   private citationContainer: HTMLElement | null = null;
+  private syncContainer: HTMLElement | null = null;
 
   constructor(app: App, plugin: ZoteroConnector) {
     super(app, plugin);
@@ -478,11 +481,13 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     this.metadataContainer = containerEl.createDiv();
     this.notesContainer = containerEl.createDiv();
     this.citationContainer = containerEl.createDiv();
+    this.syncContainer = containerEl.createDiv();
 
     // ── 渲染各 Tab ──
     this._renderMetadataTab(this.metadataContainer);
     this._renderNotesTab(this.notesContainer);
     this._renderCitationTab(this.citationContainer);
+    this._renderSyncTab(this.syncContainer);
 
     // ── 显示/隐藏 ──
     this._showActiveTab();
@@ -495,6 +500,17 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
       this.notesContainer.style.display = this.activeTab === 'notes' ? 'block' : 'none';
     if (this.citationContainer)
       this.citationContainer.style.display = this.activeTab === 'citation' ? 'block' : 'none';
+    if (this.syncContainer)
+      this.syncContainer.style.display = this.activeTab === 'sync' ? 'block' : 'none';
+  }
+
+
+  // ── Tab 4：同步悬浮球设置 ──
+
+  private _renderSyncTab(container: HTMLElement) {
+    container.empty();
+    // 复用悬浮球设置渲染逻辑
+    this._renderFloatingTriggerKey(container);
   }
 
   // ── Tab 1：元数据映射 ──
@@ -502,8 +518,11 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   private _renderMetadataTab(container: HTMLElement) {
     container.empty();
 
-    // Property Mappings（使用原生 Setting API，保留拖拽排序）
-    this._renderPropertyMappings(container);
+    // ── v5.1 悬浮球设置区（置顶，确保用户可见）──
+    // (floating button settings moved to Sync tab)
+
+    // ── v5.2 统一属性列表（Zotero 字段 + 自定义属性，混合拖拽排序）──
+    this._renderPropertyItems(container);
 
     // IF Color Rules
     this._renderIfColorRules(container);
@@ -599,6 +618,99 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     this.plugin.settings[key] = value;
     this.debouncedSave();
   };
+
+  // ── v5.0 自定义属性区 ──
+
+
+  // ── v5.0 悬浮球触发条件区 ──
+
+  private _renderFloatingTriggerKey(container: HTMLElement) {
+    const existing = container.querySelector('#zotero-trigger-key-container');
+    if (existing) existing.remove();
+
+    const wrapper = container.createDiv('zotero-trigger-key-container zt-floating-card');
+    wrapper.id = 'zotero-trigger-key-container';
+
+    new Setting(wrapper)
+      .setName(t('settings.metadata.triggerFeatureKey'))
+      .setDesc(t('settings.metadata.triggerFeatureKey.desc'))
+      .addText((text) => {
+        text
+          .setValue(this.plugin.settings.triggerFeatureKey || '文献标题')
+          .setPlaceholder('文献标题')
+          .onChange((value) => {
+            this.plugin.settings.triggerFeatureKey = value;
+            this.debouncedSave();
+          });
+      });
+
+    new Setting(wrapper)
+      .setName(t('settings.metadata.triggerFeatureValue'))
+      .setDesc(t('settings.metadata.triggerFeatureValue.desc'))
+      .addText((text) => {
+        text
+          .setValue(this.plugin.settings.triggerFeatureValue || '')
+          .setPlaceholder('文献笔记')
+          .onChange((value) => {
+            this.plugin.settings.triggerFeatureValue = value;
+            this.debouncedSave();
+          });
+      });
+
+    // ── v5.1: 悬浮球命令多选 ──
+    const commandSection = wrapper.createDiv('zotero-command-toggles');
+    commandSection.style.marginTop = '12px';
+
+    new Setting(wrapper)
+      .setName(t('settings.metadata.floatingButtonCommands'))
+      .setDesc(t('settings.metadata.floatingButtonCommands.desc'))
+      .setHeading();
+
+    const commands = this.plugin.settings.floatingButtonCommands || ['zdc-update-metadata'];
+
+    const commandOptions: { id: string; labelKey: string }[] = [
+      { id: 'zdc-update-metadata', labelKey: 'command.updateMetadata' },
+      { id: 'zdc-sync-annotations', labelKey: 'command.syncAnnotations' },
+      { id: 'zdc-quick-import', labelKey: 'command.quickImport' },
+      { id: 'zdc-insert-bibliography', labelKey: 'command.insertBibliography' },
+      { id: 'zdc-copy-citation', labelKey: 'command.copyCitation' },
+      { id: 'zdc-insert-annotations', labelKey: 'command.insertAnnotations' },
+    ];
+
+    const noCommandsHint = wrapper.createDiv('zotero-no-commands-hint');
+    noCommandsHint.style.cssText = 'color: var(--text-warning); font-size: 0.85em; margin: 8px 0; display: none;';
+
+    const refreshToggles = () => {
+      const selected = this.plugin.settings.floatingButtonCommands || [];
+      noCommandsHint.style.display = selected.length === 0 ? 'block' : 'none';
+    };
+
+    for (const opt of commandOptions) {
+      new Setting(wrapper)
+        .setName(t(opt.labelKey))
+        .addToggle((toggle) => {
+          toggle
+            .setValue(commands.includes(opt.id))
+            .onChange((value) => {
+              const current = this.plugin.settings.floatingButtonCommands || ['zdc-update-metadata'];
+              if (value) {
+                if (!current.includes(opt.id)) {
+                  current.push(opt.id);
+                }
+              } else {
+                const idx = current.indexOf(opt.id);
+                if (idx >= 0) current.splice(idx, 1);
+              }
+              this.plugin.settings.floatingButtonCommands = current;
+              this.debouncedSave();
+              refreshToggles();
+            });
+        });
+    }
+
+    noCommandsHint.createSpan({ text: t('settings.metadata.floatingButtonCommands.noCommands') });
+    refreshToggles();
+  }
 
   // ── IF Color Rules（保留原生 Setting API）──
 
@@ -752,67 +864,142 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
       );
   }
 
-  // ── Property Mappings（保留拖拽排序 + 原生 Setting API）──
+  // ── v5.2 统一属性列表（Zotero 字段 + 自定义属性，混合拖拽排序）──
 
-  private _renderPropertyMappings(container: HTMLElement) {
-    const scrollTop = container.scrollTop;
-
-    const existing = container.querySelector('#zotero-property-mappings-container');
+  private _renderPropertyItems(container: HTMLElement) {
+    const existing = container.querySelector('#zotero-property-items-container');
     if (existing) existing.remove();
 
-    const wrapper = container.createDiv('zotero-property-mappings-container zt-setting-card-group');
-    wrapper.id = 'zotero-property-mappings-container';
+    const wrapper = container.createDiv('zotero-property-items-container zt-setting-card-group');
+    wrapper.id = 'zotero-property-items-container';
 
     new Setting(wrapper)
-      .setName(t('settings.metadata.propertyMappings'))
-      .setDesc(t('settings.metadata.propertyMappings.desc'))
+      .setName(t('settings.metadata.propertyItems'))
+      .setDesc(t('settings.metadata.propertyItems.desc'))
       .setHeading();
 
+    // 添加按钮 — 默认新增一个 Zotero 字段行
     new Setting(wrapper).addButton((btn) =>
       btn
-        .setButtonText(t('settings.template.addMapping'))
+        .setButtonText(t('settings.metadata.propertyItems.add'))
         .setCta()
         .onClick(() => {
-          const currentScrollTop = container.scrollTop;
-
-          const mappings = [...(this.plugin.settings.propertyMappings || [])];
-          const used = new Set(mappings.map((m) => m.zoteroField));
-          const next = SMART_FIELD_OPTIONS.find((opt) => !used.has(opt.value));
-          mappings.push({
-            zoteroField: next?.value || 'title_smart',
-            obsidianKey: '',
-          });
-          this.plugin.settings.propertyMappings = mappings;
+          const items = [...(this.plugin.settings.propertyItems || [])];
+          items.push({ kind: 'zotero', zoteroField: '', obsidianKey: '' });
+          this.plugin.settings.propertyItems = items;
           this.debouncedSave();
-          this._renderPropertyMappings(container);
-
-          requestAnimationFrame(() => {
-            container.scrollTop = currentScrollTop;
-          });
+          this._renderPropertyItems(container);
         })
     );
 
-    const mappings = this.plugin.settings.propertyMappings || [];
-    if (!mappings.length) return;
+    const items = this.plugin.settings.propertyItems || [];
+    if (!items.length) {
+      const emptyHint = wrapper.createDiv();
+      emptyHint.style.cssText =
+        'color: var(--text-muted); font-size: 0.85em; padding: 8px 0;';
+      emptyHint.setText(t('settings.metadata.propertyItems.empty'));
+      return;
+    }
 
-    mappings.forEach((mapping, i) => {
-      const usedFields = new Set(
-        mappings.filter((_, j) => j !== i).map((m) => m.zoteroField)
-      );
-      const availableOptions = SMART_FIELD_OPTIONS.filter(
-        (opt) => !usedFields.has(opt.value) || opt.value === mapping.zoteroField
-      );
+    const customTypeLabels: Record<string, string> = {
+      text: '文本 (text)',
+      list: '列表 (list)',
+      number: '数字 (number)',
+      checkbox: '复选框 (checkbox)',
+      date: '日期 (date)',
+    };
 
-      const updateMapping = (patch: Partial<PropertyMapping>) => {
-        const updated = [...(this.plugin.settings.propertyMappings || [])];
-        updated[i] = { ...updated[i], ...patch };
-        this.plugin.settings.propertyMappings = updated;
+    // 构建已使用的 Zotero 字段集合（仅用于 zotero 类型的下拉去重）
+    const usedZoteroFields = new Set(
+      items.filter((it) => it.kind === 'zotero').map((it) => it.zoteroField)
+    );
+
+    items.forEach((item, i) => {
+      const updateItem = (patch: Partial<PropertyItem>) => {
+        const updated = [...(this.plugin.settings.propertyItems || [])];
+        updated[i] = { ...updated[i], ...patch } as PropertyItem;
+        this.plugin.settings.propertyItems = updated;
         this.debouncedSave();
       };
 
       const settingItem = new Setting(wrapper);
 
-      // 拖拽手柄
+      // ── 类型选择器（最左侧）──
+      settingItem.addDropdown((dropdown) => {
+        dropdown.addOption('zotero', t('settings.metadata.propertyItems.kindZotero'));
+        dropdown.addOption('custom', t('settings.metadata.propertyItems.kindCustom'));
+        dropdown.setValue(item.kind).onChange((value) => {
+          const kind = value as PropertyItem['kind'];
+          if (kind === 'zotero') {
+            updateItem({ kind, customType: undefined, customValue: undefined });
+          } else {
+            updateItem({ kind, zoteroField: undefined, customType: 'text' });
+          }
+          this._renderPropertyItems(container);
+        });
+        dropdown.selectEl.style.width = '110px';
+        dropdown.selectEl.style.flexShrink = '0';
+      });
+
+      // ── Zotero 字段类型 → Zotero 字段下拉 + Obsidian 属性名 ──
+      if (item.kind === 'zotero') {
+        // 计算当前行可用的字段选项（排除其他行已选的，保留当前行的值）
+        const availableOptions = SMART_FIELD_OPTIONS.filter(
+          (opt) => !usedZoteroFields.has(opt.value) || opt.value === item.zoteroField
+        );
+
+        settingItem.addDropdown((dropdown) => {
+          availableOptions.forEach((opt) => dropdown.addOption(opt.value, opt.label));
+          dropdown.setValue(item.zoteroField || 'title_smart').onChange((value) => {
+            updateItem({ zoteroField: value });
+            this._renderPropertyItems(container);
+          });
+          dropdown.selectEl.style.width = '150px';
+          dropdown.selectEl.style.flexShrink = '0';
+        });
+
+        settingItem.addText((text) => {
+          text
+            .setValue(item.obsidianKey)
+            .setPlaceholder(t('settings.template.obsidianKey'))
+            .onChange((value) => updateItem({ obsidianKey: value }));
+          text.inputEl.style.flex = '1';
+          text.inputEl.style.minWidth = '0';
+        });
+      }
+
+      // ── 自定义属性类型 → Obsidian 属性名 + 类型下拉 + 默认值 ──
+      if (item.kind === 'custom') {
+        settingItem.addText((text) => {
+          text
+            .setValue(item.obsidianKey)
+            .setPlaceholder(t('settings.metadata.customProperties.key'))
+            .onChange((value) => updateItem({ obsidianKey: value }));
+          text.inputEl.style.width = '120px';
+          text.inputEl.style.flexShrink = '0';
+        });
+
+        settingItem.addDropdown((dropdown) => {
+          Object.keys(customTypeLabels).forEach((t) =>
+            dropdown.addOption(t, customTypeLabels[t])
+          );
+          dropdown.setValue(item.customType || 'text').onChange((value) =>
+            updateItem({ customType: value as PropertyItem['customType'] })
+          );
+          dropdown.selectEl.style.width = '140px';
+        });
+
+        settingItem.addText((text) => {
+          text
+            .setValue(item.customValue || '')
+            .setPlaceholder(t('settings.metadata.customProperties.value'))
+            .onChange((value) => updateItem({ customValue: value }));
+          text.inputEl.style.width = '100px';
+          text.inputEl.style.flexShrink = '0';
+        });
+      }
+
+      // ── 拖拽手柄（统一在最右侧按钮前）──
       settingItem.addExtraButton((btn) => {
         btn.setIcon('grip-vertical').setTooltip('拖拽排序');
         const handle = btn.extraSettingsEl;
@@ -833,6 +1020,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
         });
       });
 
+      // ── 拖放事件 ──
       settingItem.settingEl.addEventListener('dragover', (e: DragEvent) => {
         e.preventDefault();
         e.dataTransfer!.dropEffect = 'move';
@@ -851,52 +1039,28 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
         const toIndex = i;
 
         if (fromIndex !== toIndex) {
-          const mappings = [...(this.plugin.settings.propertyMappings || [])];
-          const [moved] = mappings.splice(fromIndex, 1);
-          mappings.splice(toIndex, 0, moved);
-          this.plugin.settings.propertyMappings = mappings;
+          const items = [...(this.plugin.settings.propertyItems || [])];
+          const [moved] = items.splice(fromIndex, 1);
+          items.splice(toIndex, 0, moved);
+          this.plugin.settings.propertyItems = items;
           this.debouncedSave();
-          this._renderPropertyMappings(container);
+          this._renderPropertyItems(container);
         }
       });
 
-      settingItem
-        .addDropdown((dropdown) => {
-          availableOptions.forEach((opt) => dropdown.addOption(opt.value, opt.label));
-          dropdown.setValue(mapping.zoteroField).onChange((value) => {
-            updateMapping({ zoteroField: value });
-            this._renderPropertyMappings(container);
-          });
-          dropdown.selectEl.style.width = '160px';
-          dropdown.selectEl.style.flexShrink = '0';
-        })
-        .addText((text) => {
-          text
-            .setValue(mapping.obsidianKey)
-            .setPlaceholder(t('settings.template.obsidianKey'))
-            .onChange((value) => updateMapping({ obsidianKey: value }));
-          text.inputEl.style.flex = '1';
-          text.inputEl.style.minWidth = '0';
-        })
-        .addExtraButton((btn) =>
-          btn
-            .setIcon('trash')
-            .setTooltip(t('settings.template.deleteMapping'))
-            .onClick(() => {
-              const scrollContainer = container.parentElement || container;
-              const scrollTop = scrollContainer.scrollTop;
-
-              const updated = [...(this.plugin.settings.propertyMappings || [])];
-              updated.splice(i, 1);
-              this.plugin.settings.propertyMappings = updated;
-              this.debouncedSave();
-              this._renderPropertyMappings(container);
-
-              requestAnimationFrame(() => {
-                scrollContainer.scrollTop = scrollTop;
-              });
-            })
-        );
+      // ── 删除按钮（最右侧）──
+      settingItem.addExtraButton((btn) =>
+        btn
+          .setIcon('trash')
+          .setTooltip(t('settings.template.deleteMapping'))
+          .onClick(() => {
+            const updated = [...(this.plugin.settings.propertyItems || [])];
+            updated.splice(i, 1);
+            this.plugin.settings.propertyItems = updated;
+            this.debouncedSave();
+            this._renderPropertyItems(container);
+          })
+      );
     });
   }
 

@@ -17,6 +17,7 @@ import {
 } from './bbt/exportNotes';
 import { getItemJSONFromCiteKeys, getIssueDateFromCiteKey, getBibFromCiteKeys } from './bbt/jsonRPC';
 import { buildPropertyRecord, recordToYaml } from './bbt/templateEngine';
+import { SyncFloatingButton } from './bbt/SyncFloatingButton';
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
 import {
@@ -29,6 +30,7 @@ import {
   CitationFormat,
   CiteKeyExport,
   ExportFormat,
+  PropertyItem,
   ZoteroConnectorSettings,
 } from './types';
 
@@ -48,12 +50,15 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   ifColorRules: [],
   titleMarqueeEnabled: false,
   titleMarqueeDuration: 15,
-  propertyMappings: [
-    { zoteroField: 'title_smart', obsidianKey: '标题' },
-    { zoteroField: 'authors_smart', obsidianKey: '作者' },
-    { zoteroField: 'year', obsidianKey: '年份' },
-    { zoteroField: 'journal', obsidianKey: '出版物' },
+  propertyItems: [
+    { kind: 'zotero', zoteroField: 'title_smart', obsidianKey: '标题' },
+    { kind: 'zotero', zoteroField: 'authors_smart', obsidianKey: '作者' },
+    { kind: 'zotero', zoteroField: 'year', obsidianKey: '年份' },
+    { kind: 'zotero', zoteroField: 'journal', obsidianKey: '出版物' },
   ],
+  triggerFeatureKey: '文献标题',
+  triggerFeatureValue: '',
+  floatingButtonCommands: ['zdc-update-metadata'],
   bodyTemplate: '## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}',
   openNoteAfterImport: false,
   whichNotesToOpenAfterImport: 'first-imported-note',
@@ -86,20 +91,21 @@ export default class ZoteroConnector extends Plugin {
   fuse: Fuse<CiteKeyExport>;
 
   async onload() {
+    try {
     await this.loadSettings();
     setLocale(this.settings.locale || 'en');
     this.emitter = new Events();
 
     // 统一注入美化样式（IF 颜色 + 标题跑马灯，动态属性名）
     injectBeautifyStyles(
-      this.settings.propertyMappings || [],
+      this.settings.propertyItems || [],
       this.settings.ifColorRules || [],
       this.settings.titleMarqueeEnabled || false,
       this.settings.titleMarqueeDuration || 15
     );
     this.emitter.on('settingsUpdated', () => {
       injectBeautifyStyles(
-        this.settings.propertyMappings || [],
+        this.settings.propertyItems || [],
         this.settings.ifColorRules || [],
         this.settings.titleMarqueeEnabled || false,
         this.settings.titleMarqueeDuration || 15
@@ -148,7 +154,7 @@ export default class ZoteroConnector extends Plugin {
 
             const record = buildPropertyRecord(
               item,
-              this.settings.propertyMappings || [],
+              this.settings.propertyItems || [],
               this.settings.ifColorRules || []
             );
             results.push(recordToYaml(record));
@@ -445,7 +451,14 @@ export default class ZoteroConnector extends Plugin {
 
     app.workspace.trigger('parse-style-settings');
 
+    // v5.0: 磁吸悬浮同步球
+    new SyncFloatingButton(this);
+
     fixPath();
+    } catch (e) {
+      console.error('[Zotero Plugin] onload error:', e);
+      new Notice(`Zotero插件加载失败: ${e instanceof Error ? e.message : String(e)}`, 10000);
+    }
   }
 
   onunload() {
@@ -619,6 +632,21 @@ export default class ZoteroConnector extends Plugin {
       ...DEFAULT_SETTINGS,
       ...loadedSettings,
     };
+
+    // v5.2: 迁移旧格式 propertyMappings + customProperties → propertyItems
+    if (!this.settings.propertyItems?.length && (this.settings.propertyMappings?.length || this.settings.customProperties?.length)) {
+      const items: PropertyItem[] = [];
+      for (const m of this.settings.propertyMappings || []) {
+        items.push({ kind: 'zotero', obsidianKey: m.obsidianKey, zoteroField: m.zoteroField });
+      }
+      for (const c of this.settings.customProperties || []) {
+        items.push({ kind: 'custom', obsidianKey: c.key, customType: c.type, customValue: c.value });
+      }
+      this.settings.propertyItems = items;
+      delete this.settings.propertyMappings;
+      delete this.settings.customProperties;
+      await this.saveSettings();
+    }
   }
 
   async saveSettings() {

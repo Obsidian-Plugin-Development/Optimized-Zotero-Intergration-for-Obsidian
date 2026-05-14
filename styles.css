@@ -317,3 +317,23 @@
     align-items: center;
     gap: 8px;
 }
+
+/* 悬浮球设置卡片（保留 setting-item-info 可见） */
+.zt-floating-card {
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 0 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.zt-floating-card .setting-item {
+    border-top: none;
+    border-bottom: 1px solid var(--background-modifier-border-hover);
+    padding: 18px 0;
+}
+
+.zt-floating-card .setting-item:last-child {
+    border-bottom: none;
+}

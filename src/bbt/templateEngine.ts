@@ -1,5 +1,5 @@
 import { extractSmartField } from './smartExtractors';
-import { IfColorRule, PropertyMapping } from '../types';
+import { IfColorRule, PropertyItem } from '../types';
 import { matchIfRule } from './styleManager';
 
 // ── YAML 强类型规范 ──
@@ -18,28 +18,69 @@ const SINGLE_VALUE_FIELDS = new Set([
   'extra_translation'
 ]);
 
+// ── 自定义属性值解析 ──
+
+/**
+ * 将用户输入的原始字符串按目标类型解析为 JS 值，
+ * 确保 recordToYaml 输出正确的 YAML 类型标记。
+ */
+function parseCustomValue(raw: string, type: string): any {
+  switch (type) {
+    case 'number': {
+      const n = parseFloat(raw);
+      return isNaN(n) ? raw : n;
+    }
+    case 'checkbox':
+      return raw === 'true' || raw === '1' || raw === 'yes';
+    case 'list':
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    default:
+      return raw;
+  }
+}
+
 // ── Record 构建 ──
 
 export function buildPropertyRecord(
   item: any,
-  propertyMappings: PropertyMapping[],
+  propertyItems: PropertyItem[],
   ifColorRules?: IfColorRule[]
 ): Record<string, any> {
   const record: Record<string, any> = {};
   const cssclasses: string[] = [];
 
-  for (const mapping of propertyMappings) {
-    if (!mapping.zoteroField || !mapping.obsidianKey) continue;
+  for (const pi of propertyItems) {
+    if (!pi.obsidianKey) continue;
 
-    let value = extractSmartField(mapping.zoteroField, item);
+    // ── 自定义属性：注入默认值 ──
+    if (pi.kind === 'custom') {
+      if (pi.customValue !== undefined && pi.customValue !== '') {
+        record[pi.obsidianKey] = parseCustomValue(pi.customValue, pi.customType || 'text');
+      } else {
+        switch (pi.customType || 'text') {
+          case 'text':   record[pi.obsidianKey] = ''; break;
+          case 'list':   record[pi.obsidianKey] = []; break;
+          case 'number': record[pi.obsidianKey] = 0; break;
+          case 'checkbox': record[pi.obsidianKey] = false; break;
+          case 'date':   record[pi.obsidianKey] = ''; break;
+          default:       record[pi.obsidianKey] = ''; break;
+        }
+      }
+      continue;
+    }
+
+    // ── Zotero 字段映射 ──
+    if (!pi.zoteroField) continue;
+
+    let value = extractSmartField(pi.zoteroField, item);
 
     // 跳过无效值
     if (value === null || value === undefined || value === '') continue;
     if (Array.isArray(value) && value.length === 0) continue;
 
     // IF 纯数字存储，颜色规则匹配；小数尾缀 .0 由 styleManager 在视图层注入
-    if (mapping.zoteroField === 'impact_factor_smart' && typeof value === 'number') {
-      record[mapping.obsidianKey] = value;
+    if (pi.zoteroField === 'impact_factor_smart' && typeof value === 'number') {
+      record[pi.obsidianKey] = value;
       const matchedRule = matchIfRule(value, ifColorRules || []);
       if (matchedRule) {
         cssclasses.push(matchedRule.className);
@@ -48,15 +89,13 @@ export function buildPropertyRecord(
     }
 
     // 强类型转换：单值字段 vs 列表字段
-    if (SINGLE_VALUE_FIELDS.has(mapping.zoteroField)) {
-      // 单值字段：如果是数组，取第一个元素
+    if (SINGLE_VALUE_FIELDS.has(pi.zoteroField)) {
       value = Array.isArray(value) ? value[0] : value;
     } else {
-      // 列表字段：如果不是数组，包装成数组
       value = Array.isArray(value) ? value : [value];
     }
 
-    record[mapping.obsidianKey] = value;
+    record[pi.obsidianKey] = value;
   }
 
   if (cssclasses.length > 0) {
@@ -92,9 +131,12 @@ export function recordToYaml(record: Record<string, any>): string {
 
   for (const [key, value] of Object.entries(record)) {
     if (value === null || value === undefined) continue;
-    if (Array.isArray(value) && value.length === 0) continue;
 
     if (Array.isArray(value)) {
+      if (value.length === 0) {
+        lines.push(`${key}: []`);
+        continue;
+      }
       const items = value.map((v: any) => {
         if (typeof v === 'number') return v.toString();
         return yamlEscape(String(v));
@@ -103,8 +145,15 @@ export function recordToYaml(record: Record<string, any>): string {
     } else if (typeof value === 'number') {
       const formatted = Number.isInteger(value) ? value.toFixed(1) : value.toString();
       lines.push(`${key}: ${formatted}`);
+    } else if (typeof value === 'boolean') {
+      lines.push(`${key}: ${value}`);
     } else {
-      lines.push(`${key}: ${yamlEscape(String(value))}`);
+      const strValue = String(value);
+      if (strValue === '') {
+        lines.push(`${key}: ''`);
+      } else {
+        lines.push(`${key}: ${yamlEscape(strValue)}`);
+      }
     }
   }
 

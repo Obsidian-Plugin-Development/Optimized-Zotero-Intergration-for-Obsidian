@@ -1,4 +1,5 @@
-import { IfColorRule, PropertyMapping } from '../types';
+import { IfColorRule, PropertyItem } from '../types';
+import { getZoteroMappings } from './helpers';
 
 /**
  * 从 libraryCatalog 字段中提取影响因子数值。
@@ -661,11 +662,12 @@ export function removeTitleMarqueeStyles(): void {
 // ── 统一入口 ──
 
 export function injectBeautifyStyles(
-  propertyMappings: PropertyMapping[],
+  propertyItems: PropertyItem[],
   ifColorRules: IfColorRule[],
   enableTitleMarquee: boolean,
   marqueeDuration: number
 ): void {
+  const propertyMappings = getZoteroMappings(propertyItems);
   const titleMapping = propertyMappings.find(
     (m) => m.zoteroField === 'title_smart'
   );

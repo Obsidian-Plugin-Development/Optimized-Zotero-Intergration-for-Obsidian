@@ -90,6 +90,27 @@ export interface PropertyMapping {
   obsidianKey: string;
 }
 
+/** v5.0: 用户自定义 Obsidian 属性预设（保留用于 helper 返回类型） */
+export interface CustomProperty {
+  key: string;
+  type: 'text' | 'list' | 'number' | 'checkbox' | 'date';
+  /** v5.1: 用户指定的默认值，优先级高于类型默认值 */
+  value?: string;
+}
+
+/** v5.2: 统一属性项 — 合并 Zotero 字段映射与用户自定义属性 */
+export interface PropertyItem {
+  kind: 'zotero' | 'custom';
+  /** Obsidian 属性名（两者共用） */
+  obsidianKey: string;
+  /** Zotero 字段名（仅 kind='zotero'） */
+  zoteroField?: string;
+  /** 自定义属性类型（仅 kind='custom'） */
+  customType?: 'text' | 'list' | 'number' | 'checkbox' | 'date';
+  /** 自定义属性默认值（仅 kind='custom'） */
+  customValue?: string;
+}
+
 export interface SmartFieldOption {
   value: string;
   label: string;
@@ -108,7 +129,18 @@ export interface ZoteroConnectorSettings {
   ifColorRules?: IfColorRule[];
   titleMarqueeEnabled?: boolean;
   titleMarqueeDuration?: number;
+  /** v5.2: 统一属性列表 — 替代旧的 propertyMappings + customProperties */
+  propertyItems?: PropertyItem[];
+  /** v5.2 已废弃，迁移到 propertyItems */
   propertyMappings?: PropertyMapping[];
+  /** v5.2 已废弃，迁移到 propertyItems */
+  customProperties?: CustomProperty[];
+  /** v5.0: 悬浮球触发特征键，YAML 中包含此 key 时才判定为文献笔记 */
+  triggerFeatureKey?: string;
+  /** v5.1: 悬浮球触发特征值。设置了值则需要 key+value 同时匹配 */
+  triggerFeatureValue?: string;
+  /** v5.0: 悬浮球点击后可触发的命令 ID 列表（多选），弹出菜单供用户选择 */
+  floatingButtonCommands?: string[];
   bodyTemplate?: string;
   /** v3.0: 智能多级文件夹路由的根存储目录 */
   baseStorageFolder?: string;
