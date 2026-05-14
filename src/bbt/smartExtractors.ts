@@ -119,15 +119,18 @@ function extractStatusTagsSmart(item: any): string[] {
 }
 
 /**
- * 提取星标优先级 - 动态双轨语义评价系统。
+ * 提取星标优先级 - 动态双轨语义评价系统 (v5.1.0 双符号体系)。
  *
  * 废弃旧的 Emoji 标签提取逻辑，改用 ZoteroDataProcessor
  * 的状态感知双轨算法，输出格式：
- *   [5位Unicode星标串] ([语义评语])
+ *   [5位Unicode符号串] ([语义评语])
+ *
+ * 目标系 (待阅读/阅读中)：菱形符号 ◆◇，上限3，固定5字符
+ * 评估系 (已完成)：星星符号 ★☆，1-5，固定5字符
  *
  * 示例：
- *   Zotero评2分，状态unread  → ★★☆☆☆ (值得关注)
- *   Zotero评5分，状态reading → ★★★☆☆ (重点精读)
+ *   Zotero评2分，状态unread  → ◆◆◇◇◇ (值得关注)
+ *   Zotero评5分，状态reading → ◆◆◆◇◇ (重点精读)
  *   Zotero评4分，状态done    → ★★★★☆ (高度相关)
  *   Zotero评5分，状态done    → ★★★★★ (关键研究)
  */

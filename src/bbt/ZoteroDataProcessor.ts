@@ -5,17 +5,28 @@
  * 基于"阅读状态"实现 3+5 动态双轨语义评价系统。
  *
  * v2.1.0 重构
+ * v5.1.0: 双符号体系 — 目标系(菱形) vs 评估系(星星)
  */
 
 // ═══════════════════════════════════════════════
 // 步骤 1：符号与 Unicode 定义 (严格防乱码)
 // ═══════════════════════════════════════════════
 
-/** 实心星星 (Filled Star，用于填充) */
+// ── 评估系 (Completed / 已完成)：星星 ──
+
+/** 实心星星 (Filled Star，用于评估系填充) */
 export const STAR_FILLED = '\u2605';
 
-/** 空心星星 (Hollow Star，用于背景) */
+/** 空心星星 (Hollow Star，用于评估系背景) */
 export const STAR_HOLLOW = '\u2606';
+
+// ── 目标系 (Pre-read / 待阅读·阅读中)：菱形 ──
+
+/** 实心菱形 (Filled Diamond，用于目标系填充) */
+export const DIAMOND_FILLED = '\u25C6';
+
+/** 空心菱形 (Hollow Diamond，用于目标系背景) */
+export const DIAMOND_HOLLOW = '\u25C7';
 
 // ═══════════════════════════════════════════════
 // 步骤 2：阅读状态中文化 (Status Translation)
@@ -90,21 +101,21 @@ export interface RatingResult {
   statusText: string;
   /** 对应的语义评语 */
   comment: string;
-  /** 5 字符星标串 */
-  starString: string;
+  /** 5 字符符号串（目标系=菱形，评估系=星星） */
+  symbolString: string;
   /** 最终格式化输出 */
   formatted: string;
 }
 
 /**
- * 状态感知与星标组装核心算法。
+ * 状态感知与符号组装核心算法 (v5.1.0 双符号体系)。
  *
- * 结合文献的星标数字 rawRating 和中文化后的阅读状态 statusText，
- * 执行状态分支、评分拦截、动态填充与最终拼接。
+ * 目标系 (待阅读/阅读中)：实心菱形\u25C6 + 空心菱形\u25C7，评分上限3，共5字符
+ * 评估系 (已完成)：实心星\u2605 + 空心星\u2606，评分1-5，共5字符
  *
  * @param rawRating - Zotero 原始评星数 (1-5)
  * @param statusText - 中文化后的阅读状态 ("待阅读" | "阅读中" | "已完成")
- * @returns RatingResult - 包含修正评分、评语、星标串和格式化输出
+ * @returns RatingResult - 包含修正评分、评语、符号串和格式化输出
  */
 export function assembleRating(
   rawRating: number,
@@ -114,32 +125,37 @@ export function assembleRating(
   let clampedRating = Math.max(1, Math.round(rawRating));
 
   let comment: string;
+  let filled: string;
+  let hollow: string;
 
-  // ── 状态分支与评分拦截 ──
+  // ── 状态分支、评分拦截与符号选择 ──
   if (statusText === '待阅读' || statusText === '阅读中') {
-    // 预读轨：超过 3 分强制修正为 3
+    // 目标系 (Pre-read)：菱形符号，上限 3
+    filled = DIAMOND_FILLED;
+    hollow = DIAMOND_HOLLOW;
     if (clampedRating > 3) {
       clampedRating = 3;
     }
     comment = PRE_READ_DICT[clampedRating] || PRE_READ_DICT[1];
   } else {
-    // 已完成轨 (statusText === '已完成')：保持 1-5
-    // 兜底：未知状态也走已读轨
+    // 评估系 (Post-read / 兜底)：星星符号，保持 1-5
+    filled = STAR_FILLED;
+    hollow = STAR_HOLLOW;
     comment = POST_READ_DICT[clampedRating] || POST_READ_DICT[1];
   }
 
-  // ── 动态填充计算 ──
-  const starString =
-    STAR_FILLED.repeat(clampedRating) + STAR_HOLLOW.repeat(5 - clampedRating);
+  // ── 动态填充计算（5 字符占位，保证 Dataview 视图对齐）──
+  const symbolString =
+    filled.repeat(clampedRating) + hollow.repeat(5 - clampedRating);
 
   // ── 最终拼接 ──
-  const formatted = `${starString} (${comment})`;
+  const formatted = `${symbolString} (${comment})`;
 
   return {
     rating: clampedRating,
     statusText,
     comment,
-    starString,
+    symbolString,
     formatted,
   };
 }

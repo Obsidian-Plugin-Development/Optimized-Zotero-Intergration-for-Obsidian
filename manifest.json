@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "5.0.0",
+	"version": "5.1.0",
 	"minAppVersion": "1.1.1",
-	"description": "v5.0.0: 统一属性列表重构 — Zotero字段映射与自定义属性合并管理，支持类型解析与混合排序",
+	"description": "v5.1.0: 动态双轨语义评价系统 — 圆点(目标系)与星星(评估系)双符号体系，5字符定宽对齐",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

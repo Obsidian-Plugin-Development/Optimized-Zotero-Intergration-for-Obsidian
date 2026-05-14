@@ -6,16 +6,18 @@ import {
   translateStatus,
   STAR_FILLED,
   STAR_HOLLOW,
+  DIAMOND_FILLED,
+  DIAMOND_HOLLOW,
   PRE_READ_DICT,
   POST_READ_DICT,
   DEFAULT_STATUS,
 } from '../ZoteroDataProcessor';
 
 // ═══════════════════════════════════════════════
-// 步骤 1：Unicode 星标定义测试
+// 步骤 1：Unicode 几何符号定义测试 (v5.1.0)
 // ═══════════════════════════════════════════════
 
-describe('Unicode 星标定义', () => {
+describe('Unicode 几何符号定义', () => {
   it('STAR_FILLED 应为 Unicode \u2605', () => {
     expect(STAR_FILLED).toBe('\u2605');
     expect(STAR_FILLED).toHaveLength(1);
@@ -24,6 +26,16 @@ describe('Unicode 星标定义', () => {
   it('STAR_HOLLOW 应为 Unicode \u2606', () => {
     expect(STAR_HOLLOW).toBe('\u2606');
     expect(STAR_HOLLOW).toHaveLength(1);
+  });
+
+  it('DIAMOND_FILLED 应为 Unicode \u25C6', () => {
+    expect(DIAMOND_FILLED).toBe('\u25C6');
+    expect(DIAMOND_FILLED).toHaveLength(1);
+  });
+
+  it('DIAMOND_HOLLOW 应为 Unicode \u25C7', () => {
+    expect(DIAMOND_HOLLOW).toBe('\u25C7');
+    expect(DIAMOND_HOLLOW).toHaveLength(1);
   });
 });
 
@@ -96,29 +108,49 @@ describe('动态双轨映射字典', () => {
 // 步骤 4：核心算法测试
 // ═══════════════════════════════════════════════
 
-describe('assembleRating - 状态感知与星标组装算法', () => {
-  // ── 用户指定预期输出示例 ──
+describe('assembleRating - 状态感知与双符号组装算法 (v5.1.0)', () => {
+  // ── 目标系 (待阅读/阅读中)：菱形符号，上限3 ──
 
-  it('Zotero评2分，状态unread → ★★☆☆☆ (值得关注)', () => {
+  it('Zotero评2分，状态unread → ◆◆◇◇◇ (值得关注)', () => {
     const result = assembleRating(2, '待阅读');
     expect(result.rating).toBe(2);
-    expect(result.starString).toBe('\u2605\u2605\u2606\u2606\u2606');
+    expect(result.symbolString).toBe('\u25C6\u25C6\u25C7\u25C7\u25C7');
     expect(result.comment).toBe('值得关注');
-    expect(result.formatted).toBe('★★☆☆☆ (值得关注)');
+    expect(result.formatted).toBe('◆◆◇◇◇ (值得关注)');
   });
 
-  it('Zotero评5分，状态reading → ★★★☆☆ (重点精读) (触发大于3分强制拦截)', () => {
+  it('Zotero评5分，状态reading → ◆◆◆◇◇ (重点精读) (触发大于3分强制拦截)', () => {
     const result = assembleRating(5, '阅读中');
     expect(result.rating).toBe(3); // 强制修正为 3
-    expect(result.starString).toBe('\u2605\u2605\u2605\u2606\u2606');
+    expect(result.symbolString).toBe('\u25C6\u25C6\u25C6\u25C7\u25C7');
     expect(result.comment).toBe('重点精读');
-    expect(result.formatted).toBe('★★★☆☆ (重点精读)');
+    expect(result.formatted).toBe('◆◆◆◇◇ (重点精读)');
   });
+
+  it('评1分，状态待阅读 → ◆◇◇◇◇ (简单泛读)', () => {
+    const result = assembleRating(1, '待阅读');
+    expect(result.rating).toBe(1);
+    expect(result.formatted).toBe('◆◇◇◇◇ (简单泛读)');
+  });
+
+  it('评3分，状态阅读中 → ◆◆◆◇◇ (重点精读)', () => {
+    const result = assembleRating(3, '阅读中');
+    expect(result.rating).toBe(3);
+    expect(result.formatted).toBe('◆◆◆◇◇ (重点精读)');
+  });
+
+  it('评4分，状态待阅读 → ◆◆◆◇◇ (重点精读) (触发拦截)', () => {
+    const result = assembleRating(4, '待阅读');
+    expect(result.rating).toBe(3);
+    expect(result.formatted).toBe('◆◆◆◇◇ (重点精读)');
+  });
+
+  // ── 评估系 (已完成)：星星符号，1-5 ──
 
   it('Zotero评4分，状态done → ★★★★☆ (高度相关)', () => {
     const result = assembleRating(4, '已完成');
     expect(result.rating).toBe(4);
-    expect(result.starString).toBe('\u2605\u2605\u2605\u2605\u2606');
+    expect(result.symbolString).toBe('\u2605\u2605\u2605\u2605\u2606');
     expect(result.comment).toBe('高度相关');
     expect(result.formatted).toBe('★★★★☆ (高度相关)');
   });
@@ -126,32 +158,10 @@ describe('assembleRating - 状态感知与星标组装算法', () => {
   it('Zotero评5分，状态done → ★★★★★ (关键研究)', () => {
     const result = assembleRating(5, '已完成');
     expect(result.rating).toBe(5);
-    expect(result.starString).toBe('\u2605\u2605\u2605\u2605\u2605');
+    expect(result.symbolString).toBe('\u2605\u2605\u2605\u2605\u2605');
     expect(result.comment).toBe('关键研究');
     expect(result.formatted).toBe('★★★★★ (关键研究)');
   });
-
-  // ── 预读轨 (待阅读/阅读中) 更多测试 ──
-
-  it('评1分，状态待阅读 → ★☆☆☆☆ (简单泛读)', () => {
-    const result = assembleRating(1, '待阅读');
-    expect(result.rating).toBe(1);
-    expect(result.formatted).toBe('★☆☆☆☆ (简单泛读)');
-  });
-
-  it('评3分，状态阅读中 → ★★★☆☆ (重点精读)', () => {
-    const result = assembleRating(3, '阅读中');
-    expect(result.rating).toBe(3);
-    expect(result.formatted).toBe('★★★☆☆ (重点精读)');
-  });
-
-  it('评4分，状态待阅读 → ★★★☆☆ (重点精读) (触发拦截)', () => {
-    const result = assembleRating(4, '待阅读');
-    expect(result.rating).toBe(3);
-    expect(result.formatted).toBe('★★★☆☆ (重点精读)');
-  });
-
-  // ── 已读轨 (已完成) 更多测试 ──
 
   it('评1分，状态已完成 → ★☆☆☆☆ (知识储备)', () => {
     const result = assembleRating(1, '已完成');
@@ -171,7 +181,7 @@ describe('assembleRating - 状态感知与星标组装算法', () => {
 
   // ── 边界与异常测试 ──
 
-  it('异常状态走已读轨作为兜底', () => {
+  it('异常状态走评估系兜底（星星）', () => {
     const result = assembleRating(3, '某个未知状态');
     expect(result.comment).toBe('值得借鉴'); // 已读字典 3 分
     expect(result.rating).toBe(3);
@@ -267,14 +277,14 @@ describe('processItemRating - 一站式文献评级处理', () => {
     const item = {
       tags: [{ tag: '⭐⭐' }, { tag: '/unread' }],
     };
-    expect(processItemRating(item)).toBe('★★☆☆☆ (值得关注)');
+    expect(processItemRating(item)).toBe('◆◆◇◇◇ (值得关注)');
   });
 
   it('评5分+状态reading → 预读轨拦截', () => {
     const item = {
       tags: [{ tag: '⭐⭐⭐⭐⭐' }, { tag: '/reading' }],
     };
-    expect(processItemRating(item)).toBe('★★★☆☆ (重点精读)');
+    expect(processItemRating(item)).toBe('◆◆◆◇◇ (重点精读)');
   });
 
   it('评4分+状态done → 已读轨', () => {
@@ -302,7 +312,7 @@ describe('processItemRating - 一站式文献评级处理', () => {
     const item = {
       tags: [{ tag: '★★★' }],
     };
-    expect(processItemRating(item)).toBe('★★★☆☆ (重点精读)');
+    expect(processItemRating(item)).toBe('◆◆◆◇◇ (重点精读)');
   });
 
   it('无tags数组返回空字符串', () => {
