@@ -128,13 +128,26 @@ export function renderBodyTemplate(
   });
 }
 
+// ── v4.0 边界标记 ──
+
+export const ZOTERO_BODY_START = '%% Zotero_Notes_Start %%';
+export const ZOTERO_BODY_END = '%% Zotero_Notes_End %%';
+
 // ── 组装完整 Markdown ──
 
+/**
+ * 组装最终 Markdown 文件内容。
+ * v4.0: 正文内容包裹在 Zotero 边界标记之间，
+ * 确保再导入时只替换标记内区域，不覆盖用户手写笔记。
+ */
 export function assembleMarkdown(
   record: Record<string, any>,
   bodyTemplate: string
 ): string {
   const yaml = recordToYaml(record);
   const body = renderBodyTemplate(bodyTemplate, record);
-  return yaml + '\n' + body;
+  const wrappedBody = body
+    ? `\n${ZOTERO_BODY_START}\n${body}\n${ZOTERO_BODY_END}\n`
+    : '';
+  return yaml + wrappedBody;
 }

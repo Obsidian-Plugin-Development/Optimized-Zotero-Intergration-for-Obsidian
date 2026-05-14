@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "3.0.0",
+	"version": "4.0.0",
 	"minAppVersion": "1.1.1",
-	"description": "v3.0.0: 智能多级文件夹路由 + 存储Tab独立 + 递归目录生成器 + 最长路径优先算法",
+	"description": "v4.0.0: 元数据/笔记/参考文献三路解耦导入 + 作者属性列表化（第一作者† / 通讯作者✉ / et al.）",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

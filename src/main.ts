@@ -1,10 +1,10 @@
 import Fuse from 'fuse.js';
-import { EditableFileView, Events, Notice, Plugin, TFile } from 'obsidian';
+import { EditableFileView, Events, Notice, Plugin, TFile, htmlToMarkdown } from 'obsidian';
 import { shellPath } from 'shell-path';
 
 import { DataExplorerView, viewType } from './DataExplorerView';
 import { LoadingModal } from './bbt/LoadingModal';
-import { getCAYW } from './bbt/cayw';
+import { getCAYW, getCiteKeys } from './bbt/cayw';
 import {
   injectBeautifyStyles,
   removeBeautifyStyles,
@@ -15,6 +15,8 @@ import {
   insertNotesIntoCurrentDoc,
   noteExportPrompt,
 } from './bbt/exportNotes';
+import { getItemJSONFromCiteKeys, getIssueDateFromCiteKey, getBibFromCiteKeys } from './bbt/jsonRPC';
+import { buildPropertyRecord, recordToYaml } from './bbt/templateEngine';
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
 import {
@@ -116,6 +118,112 @@ export default class ZoteroConnector extends Plugin {
       this.addExportCommand(f);
     });
 
+    // ── v4.0：三个插入当前笔记的命令 ──
+
+    // 命令：插入条目信息（YAML frontmatter）
+    this.addCommand({
+      id: 'zdc-insert-item-info',
+      name: t('command.insertItemInfo'),
+      editorCallback: async (editor) => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        try {
+          const citeKeys = await getCiteKeys(database);
+          if (!citeKeys.length) return;
+
+          const libraryID = citeKeys[0].library;
+          const itemData = await getItemJSONFromCiteKeys(citeKeys, database, libraryID);
+          if (!itemData?.length) return;
+
+          const results: string[] = [];
+          for (const item of itemData) {
+            try {
+              item.date = await getIssueDateFromCiteKey(
+                { key: item.citekey || item.key, library: libraryID },
+                database
+              );
+            } catch { /* date is optional */ }
+
+            const record = buildPropertyRecord(
+              item,
+              this.settings.propertyMappings || [],
+              this.settings.ifColorRules || []
+            );
+            results.push(recordToYaml(record));
+          }
+
+          editor.replaceSelection(results.join('\n\n'));
+          new Notice(
+            t('notice.itemInfoInserted', String(results.length)),
+            3000
+          );
+        } catch (e) {
+          new Notice(
+            `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
+            5000
+          );
+        }
+      },
+    });
+
+    // 命令：插入笔记与批注（Zotero notes + PDF annotations）
+    this.addCommand({
+      id: 'zdc-insert-annotations',
+      name: t('command.insertAnnotations'),
+      editorCallback: (editor) => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        noteExportPrompt(
+          database,
+          this.app.workspace.getActiveFile()?.parent.path
+        ).then((notes) => {
+          if (notes) {
+            insertNotesIntoCurrentDoc(editor, notes);
+            new Notice(
+              t('notice.annotationsInserted', String(Object.keys(notes).length)),
+              3000
+            );
+          }
+        });
+      },
+    });
+
+    // 命令：插入参考文献（formatted bibliography）
+    this.addCommand({
+      id: 'zdc-insert-bibliography',
+      name: t('command.insertBibliography'),
+      editorCallback: async (editor) => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        try {
+          const citeKeys = await getCiteKeys(database);
+          if (!citeKeys.length) return;
+
+          const bib = await getBibFromCiteKeys(citeKeys, database);
+          if (bib) {
+            // getBibFromCiteKeys returns HTML; convert to Markdown
+            const markdownBib = htmlToMarkdown(bib);
+            editor.replaceSelection(markdownBib);
+            new Notice(
+              t('notice.bibInserted', String(citeKeys.length)),
+              3000
+            );
+          }
+        } catch (e) {
+          new Notice(
+            `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
+            5000
+          );
+        }
+      },
+    });
+
     this.addCommand({
       id: 'zdc-insert-notes',
       name: t('command.insertNotes'),
@@ -198,6 +306,123 @@ export default class ZoteroConnector extends Plugin {
             text: `❌ 导入失败：${e instanceof Error ? e.message : '未知错误'}`,
           });
           setTimeout(() => progressNotice.hide(), 5000);
+        }
+      },
+    });
+
+    // ── v4.0 模块二：三个解耦命令 ──
+
+    // 命令 1：仅更新 YAML 元数据（不触碰正文）
+    this.addCommand({
+      id: 'zdc-update-metadata',
+      name: t('command.updateMetadata'),
+      callback: async () => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        const plainExportFormat: ExportFormat = {
+          name: '__update_metadata__',
+          outputPathTemplate: '{{citekey}}.md',
+          imageOutputPathTemplate: '{{citekey}}/',
+          imageBaseNameTemplate: 'image',
+        };
+        const progressNotice = new Notice('', 0);
+        try {
+          const paths = await exportToMarkdown(
+            { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'metadata' },
+            undefined,
+            ({ macro }) => {
+              progressNotice.noticeEl.empty();
+              progressNotice.noticeEl.createSpan({ text: macro });
+            }
+          );
+          progressNotice.noticeEl.empty();
+          progressNotice.noticeEl.createSpan({
+            text: paths.length > 0
+              ? t('notice.metadataUpdated', String(paths.length))
+              : t('notice.noFilesToUpdate'),
+          });
+          setTimeout(() => progressNotice.hide(), 4000);
+        } catch (e) {
+          progressNotice.noticeEl.empty();
+          progressNotice.noticeEl.createSpan({
+            text: `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
+          });
+          setTimeout(() => progressNotice.hide(), 5000);
+        }
+      },
+    });
+
+    // 命令 2：仅同步笔记与批注（不触碰 YAML）
+    this.addCommand({
+      id: 'zdc-sync-annotations',
+      name: t('command.syncAnnotations'),
+      callback: async () => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        const plainExportFormat: ExportFormat = {
+          name: '__sync_annotations__',
+          outputPathTemplate: '{{citekey}}.md',
+          imageOutputPathTemplate: '{{citekey}}/',
+          imageBaseNameTemplate: 'image',
+        };
+        const progressNotice = new Notice('', 0);
+        try {
+          const paths = await exportToMarkdown(
+            { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'annotations' },
+            undefined,
+            ({ macro }) => {
+              progressNotice.noticeEl.empty();
+              progressNotice.noticeEl.createSpan({ text: macro });
+            }
+          );
+          progressNotice.noticeEl.empty();
+          progressNotice.noticeEl.createSpan({
+            text: paths.length > 0
+              ? t('notice.annotationsSynced', String(paths.length))
+              : t('notice.noFilesToUpdate'),
+          });
+          setTimeout(() => progressNotice.hide(), 4000);
+        } catch (e) {
+          progressNotice.noticeEl.empty();
+          progressNotice.noticeEl.createSpan({
+            text: `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
+          });
+          setTimeout(() => progressNotice.hide(), 5000);
+        }
+      },
+    });
+
+    // 命令 3：复制引注占位符到剪贴板（不创建/修改任何笔记）
+    this.addCommand({
+      id: 'zdc-copy-citation',
+      name: t('command.copyCitation'),
+      callback: async () => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        try {
+          const citeFormat: CitationFormat = {
+            name: '__copy_citation__',
+            format: 'pandoc',
+            brackets: true,
+          };
+          const result = await getCAYW(citeFormat, database);
+          if (typeof result === 'string' && result.trim()) {
+            await navigator.clipboard.writeText(result);
+            new Notice(t('notice.citationCopied', result), 4000);
+          } else {
+            new Notice(t('notice.noCitationReturned'), 5000);
+          }
+        } catch (e) {
+          new Notice(
+            `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
+            5000
+          );
         }
       },
     });

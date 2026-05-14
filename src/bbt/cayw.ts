@@ -1,7 +1,7 @@
 import { Notice, request } from 'obsidian';
 
 import { t } from '../locale/i18n';
-import { bringObsidianToFront, getCurrentWindow } from '../helpers';
+import { bringObsidianToFront, focusZotero, getCurrentWindow } from '../helpers';
 import { CitationFormat, DatabaseWithPort } from '../types';
 import { LoadingModal } from './LoadingModal';
 import { defaultHeaders, getPort } from './helpers';
@@ -88,6 +88,9 @@ export async function getCAYW(
     return null;
   }
 
+  // 预最小化 Zotero 主窗口（SW_MINIMIZE=6），引注弹窗有独立 HWND 不受影响
+  await focusZotero(database.database);
+
   const modal = new LoadingModal(app, t('modal.awaitingSelection'));
   modal.open();
 
@@ -157,6 +160,9 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
   if (!(await isZoteroRunning(database))) {
     return null;
   }
+
+  // 预最小化 Zotero 主窗口（SW_MINIMIZE=6），引注弹窗有独立 HWND 不受影响
+  await focusZotero(database.database);
 
   const modal = new LoadingModal(app, t('modal.awaitingSelection'));
   modal.open();

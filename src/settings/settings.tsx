@@ -30,242 +30,33 @@ import { SettingItem } from './SettingItem';
 
 // ── Types ──
 
-type TabId = 'general' | 'storage' | 'beautify' | 'template';
+/** v4.0: 3 个面向工作流的清晰标签页 */
+type TabId = 'metadata' | 'notes' | 'citation';
 
 const TAB_ITEMS: { id: TabId; labelKey: string }[] = [
-  { id: 'general', labelKey: 'settings.tab.general' },
-  { id: 'storage', labelKey: 'settings.tab.storage' },
-  { id: 'beautify', labelKey: 'settings.tab.beautify' },
-  { id: 'template', labelKey: 'settings.tab.template' },
+  { id: 'metadata', labelKey: 'settings.tab.metadata' },
+  { id: 'notes', labelKey: 'settings.tab.notes' },
+  { id: 'citation', labelKey: 'settings.tab.citation' },
 ];
 
-// ── Storage Tab 的 React 组件 ──
+// ── System Header React 组件（始终可见）──
 
-interface StorageSettingsProps {
+interface SystemHeaderProps {
   settings: ZoteroConnectorSettings;
   updateSetting: (key: keyof ZoteroConnectorSettings, value: any) => void;
 }
 
-function StorageSettings({ settings, updateSetting }: StorageSettingsProps) {
+function SystemHeader({ settings, updateSetting }: SystemHeaderProps) {
+  const [locale, setLocaleState] = React.useState(getLocale());
+  const [useCustomPort, setUseCustomPort] = React.useState(settings.database === 'Custom');
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
   const [ocrState, setOCRState] = React.useState(settings.pdfExportImageOCR);
   const tessPathRef = React.useRef<HTMLInputElement>(null);
   const tessDataPathRef = React.useRef<HTMLInputElement>(null);
 
   return (
-    <div>
-      <SettingItem name={t('settings.storage.heading')} isHeading />
-
-      <SettingItem
-        name={t('settings.baseStorageFolder')}
-        description={t('settings.baseStorageFolder.desc')}
-      >
-        <input
-          onChange={(e) => updateSetting('baseStorageFolder', (e.target as HTMLInputElement).value)}
-          type="text"
-          spellCheck={false}
-          placeholder={t('settings.baseStorageFolder.placeholder')}
-          defaultValue={settings.baseStorageFolder || ''}
-        />
-      </SettingItem>
-
-      <AssetDownloader settings={settings} updateSetting={updateSetting} />
-
-      <SettingItem name={t('settings.imageSettings')} description={t('settings.imageSettings.desc')} isHeading />
-      <SettingItem name={t('settings.imageFormat')}>
-        <select
-          className="dropdown"
-          defaultValue={settings.pdfExportImageFormat}
-          onChange={(e) => updateSetting('pdfExportImageFormat', (e.target as HTMLSelectElement).value)}
-        >
-          <option value="jpg">jpg</option>
-          <option value="png">png</option>
-        </select>
-      </SettingItem>
-      <SettingItem name={t('settings.imageQuality')}>
-        <input
-          min="0" max="100"
-          onChange={(e) => updateSetting('pdfExportImageQuality', Number((e.target as HTMLInputElement).value))}
-          type="number"
-          defaultValue={settings.pdfExportImageQuality.toString()}
-        />
-      </SettingItem>
-      <SettingItem name={t('settings.imageDPI')}>
-        <input
-          min="0"
-          onChange={(e) => updateSetting('pdfExportImageDPI', Number((e.target as HTMLInputElement).value))}
-          type="number"
-          defaultValue={settings.pdfExportImageDPI.toString()}
-        />
-      </SettingItem>
-      <SettingItem
-        name={t('settings.imageOCR')}
-        description={
-          <div>
-            {t('settings.imageOCR.desc.line1')}{' '}
-            <a href="https://tesseract-ocr.github.io/tessdoc/" target="_blank" rel="noreferrer">tesseract</a>{' '}
-            {t('settings.imageOCR.desc.line2')}{' '}
-            <a href="https://brew.sh/" target="_blank" rel="noreferrer">{t('settings.imageOCR.desc.line3')}</a>
-            {t('settings.imageOCR.desc.line4')}{' '}
-            <a href="https://github.com/UB-Mannheim/tesseract/wiki" target="_blank" rel="noreferrer">{t('settings.imageOCR.desc.line5')}</a>
-            .
-          </div>
-        }
-      >
-        <div
-          onClick={() => setOCRState((s) => { updateSetting('pdfExportImageOCR', !s); return !s; })}
-          className={`checkbox-container${ocrState ? ' is-enabled' : ''}`}
-        />
-      </SettingItem>
-      <SettingItem
-        name={t('settings.imageOCR.tesseractPath')}
-        description={<div>{t('settings.imageOCR.tesseractPath.desc1')} <pre>which tesseract</pre></div>}
-      >
-        <input
-          ref={tessPathRef}
-          onChange={(e) => updateSetting('pdfExportImageTesseractPath', (e.target as HTMLInputElement).value)}
-          type="text"
-          defaultValue={settings.pdfExportImageTesseractPath}
-        />
-        <div
-          className="clickable-icon setting-editor-extra-setting-button"
-          aria-label={t('settings.pdfUtility.findTesseract')}
-          onClick={async () => {
-            try {
-              const pathToTesseract = await which('tesseract');
-              if (pathToTesseract) {
-                tessPathRef.current.value = pathToTesseract;
-                updateSetting('pdfExportImageTesseractPath', pathToTesseract);
-              } else {
-                new Notice(t('settings.pdfUtility.findTesseract.fail'));
-              }
-            } catch (e) {
-              new Notice(t('settings.pdfUtility.findTesseract.fail'));
-              console.error(e);
-            }
-          }}
-        >
-          <Icon name="magnifying-glass" />
-        </div>
-      </SettingItem>
-      <SettingItem
-        name={t('settings.imageOCR.lang')}
-        description={
-          <div>
-            {t('settings.imageOCR.lang.desc1')} <pre>eng+deu</pre>. {t('settings.imageOCR.lang.desc2')}{' '}
-            <a href="https://github.com/tesseract-ocr/tessdata" target="_blank" rel="noreferrer">{t('settings.imageOCR.lang.desc3')}</a>
-            . ({' '}
-            <a href="https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html" target="_blank" rel="noreferrer">{t('settings.imageOCR.lang.desc4')}</a>
-            )
-          </div>
-        }
-      >
-        <input
-          onChange={(e) => updateSetting('pdfExportImageOCRLang', (e.target as HTMLInputElement).value)}
-          type="text"
-          defaultValue={settings.pdfExportImageOCRLang}
-        />
-      </SettingItem>
-      <SettingItem name={t('settings.imageOCR.tessDataDir')} description={t('settings.imageOCR.tessDataDir.desc')}>
-        <input
-          ref={tessDataPathRef}
-          onChange={(e) => updateSetting('pdfExportImageTessDataDir', (e.target as HTMLInputElement).value)}
-          type="text"
-          defaultValue={settings.pdfExportImageTessDataDir}
-        />
-        <div
-          className="clickable-icon setting-editor-extra-setting-button"
-          aria-label={t('settings.pdfUtility.selectTessDataDir')}
-          onClick={() => {
-            const path = require('electron').remote.dialog.showOpenDialogSync({ properties: ['openDirectory'] });
-            if (path && path.length) {
-              tessDataPathRef.current.value = path[0];
-              updateSetting('pdfExportImageTessDataDir', path[0]);
-            }
-          }}
-        >
-          <Icon name="lucide-folder-open" />
-        </div>
-      </SettingItem>
-    </div>
-  );
-}
-
-// ── General Tab 的 React 组件 ──
-
-interface SettingsComponentProps {
-  settings: ZoteroConnectorSettings;
-  addCiteFormat: (format: CitationFormat) => CitationFormat[];
-  updateCiteFormat: (index: number, format: CitationFormat) => CitationFormat[];
-  removeCiteFormat: (index: number) => CitationFormat[];
-  addExportFormat: (format: ExportFormat) => ExportFormat[];
-  updateExportFormat: (index: number, format: ExportFormat) => ExportFormat[];
-  removeExportFormat: (index: number) => ExportFormat[];
-  updateSetting: (key: keyof ZoteroConnectorSettings, value: any) => void;
-}
-
-function SettingsComponent({
-  settings,
-  addCiteFormat,
-  updateCiteFormat,
-  removeCiteFormat,
-  addExportFormat,
-  updateExportFormat,
-  removeExportFormat,
-  updateSetting,
-}: SettingsComponentProps) {
-  const [citeFormatState, setCiteFormatState] = React.useState(settings.citeFormats);
-  const [exportFormatState, setExportFormatState] = React.useState(settings.exportFormats);
-  const [openNoteAfterImportState, setOpenNoteAfterImport] = React.useState(!!settings.openNoteAfterImport);
-  const [concat, setConcat] = React.useState(!!settings.shouldConcat);
-  const [locale, setLocaleState] = React.useState(getLocale());
-
-  const updateCite = React.useCallback(
-    debounce((index: number, format: CitationFormat) => {
-      setCiteFormatState(updateCiteFormat(index, format));
-    }, 200, true),
-    [updateCiteFormat]
-  );
-
-  const addCite = React.useCallback(() => {
-    setCiteFormatState(
-      addCiteFormat({ name: `Format #${citeFormatState.length + 1}`, format: 'formatted-citation' })
-    );
-  }, [addCiteFormat, citeFormatState]);
-
-  const removeCite = React.useCallback((index: number) => {
-    setCiteFormatState(removeCiteFormat(index));
-  }, [removeCiteFormat]);
-
-  const updateExport = React.useCallback(
-    debounce((index: number, format: ExportFormat) => {
-      setExportFormatState(updateExportFormat(index, format));
-    }, 200, true),
-    [updateExportFormat]
-  );
-
-  const addExport = React.useCallback(() => {
-    setExportFormatState(
-      addExportFormat({
-        name: `Import #${exportFormatState.length + 1}`,
-        outputPathTemplate: '{{citekey}}.md',
-        imageOutputPathTemplate: '{{citekey}}/',
-        imageBaseNameTemplate: 'image',
-      })
-    );
-  }, [addExportFormat, citeFormatState]);
-
-  const removeExport = React.useCallback((index: number) => {
-    setExportFormatState(removeExportFormat(index));
-  }, [removeExportFormat]);
-
-  const tessPathRef = React.useRef<HTMLInputElement>(null);
-  const tessDataPathRef = React.useRef<HTMLInputElement>(null);
-
-  const [useCustomPort, setUseCustomPort] = React.useState(settings.database === 'Custom');
-
-  return (
-    <div>
-      <SettingItem name={t('settings.general')} isHeading />
+    <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--background-modifier-border)' }}>
+      <SettingItem name={t('settings.system')} isHeading />
 
       <SettingItem name={t('settings.locale')} description={t('settings.locale.desc')}>
         <select
@@ -311,6 +102,216 @@ function SettingsComponent({
         </SettingItem>
       ) : null}
 
+      <SettingItem
+        name={t('settings.baseStorageFolder')}
+        description={t('settings.baseStorageFolder.desc')}
+      >
+        <input
+          onChange={(e) => updateSetting('baseStorageFolder', (e.target as HTMLInputElement).value)}
+          type="text"
+          spellCheck={false}
+          placeholder={t('settings.baseStorageFolder.placeholder')}
+          defaultValue={settings.baseStorageFolder || ''}
+        />
+      </SettingItem>
+
+      {/* 高级设置：Storage 详情 + 图片设置 */}
+      <div
+        style={{ cursor: 'pointer', marginTop: '8px', color: 'var(--text-muted)', fontSize: '0.9em' }}
+        onClick={() => setShowAdvanced(!showAdvanced)}
+      >
+        {showAdvanced ? '▾' : '▸'} {t('settings.advanced')}
+      </div>
+
+      {showAdvanced && (
+        <div style={{ marginTop: '8px', paddingLeft: '8px', borderLeft: '2px solid var(--background-modifier-border)' }}>
+          <AssetDownloader settings={settings} updateSetting={updateSetting} />
+
+          <SettingItem name={t('settings.imageSettings')} description={t('settings.imageSettings.desc')} isHeading />
+          <SettingItem name={t('settings.imageFormat')}>
+            <select
+              className="dropdown"
+              defaultValue={settings.pdfExportImageFormat}
+              onChange={(e) => updateSetting('pdfExportImageFormat', (e.target as HTMLSelectElement).value)}
+            >
+              <option value="jpg">jpg</option>
+              <option value="png">png</option>
+            </select>
+          </SettingItem>
+          <SettingItem name={t('settings.imageQuality')}>
+            <input
+              min="0" max="100"
+              onChange={(e) => updateSetting('pdfExportImageQuality', Number((e.target as HTMLInputElement).value))}
+              type="number"
+              defaultValue={settings.pdfExportImageQuality.toString()}
+            />
+          </SettingItem>
+          <SettingItem name={t('settings.imageDPI')}>
+            <input
+              min="0"
+              onChange={(e) => updateSetting('pdfExportImageDPI', Number((e.target as HTMLInputElement).value))}
+              type="number"
+              defaultValue={settings.pdfExportImageDPI.toString()}
+            />
+          </SettingItem>
+          <SettingItem
+            name={t('settings.imageOCR')}
+            description={
+              <div>
+                {t('settings.imageOCR.desc.line1')}{' '}
+                <a href="https://tesseract-ocr.github.io/tessdoc/" target="_blank" rel="noreferrer">tesseract</a>{' '}
+                {t('settings.imageOCR.desc.line2')}{' '}
+                <a href="https://brew.sh/" target="_blank" rel="noreferrer">{t('settings.imageOCR.desc.line3')}</a>
+                {t('settings.imageOCR.desc.line4')}{' '}
+                <a href="https://github.com/UB-Mannheim/tesseract/wiki" target="_blank" rel="noreferrer">{t('settings.imageOCR.desc.line5')}</a>
+                .
+              </div>
+            }
+          >
+            <div
+              onClick={() => setOCRState((s) => { updateSetting('pdfExportImageOCR', !s); return !s; })}
+              className={`checkbox-container${ocrState ? ' is-enabled' : ''}`}
+            />
+          </SettingItem>
+          <SettingItem
+            name={t('settings.imageOCR.tesseractPath')}
+            description={<div>{t('settings.imageOCR.tesseractPath.desc1')} <pre>which tesseract</pre></div>}
+          >
+            <input
+              ref={tessPathRef}
+              onChange={(e) => updateSetting('pdfExportImageTesseractPath', (e.target as HTMLInputElement).value)}
+              type="text"
+              defaultValue={settings.pdfExportImageTesseractPath}
+            />
+            <div
+              className="clickable-icon setting-editor-extra-setting-button"
+              aria-label={t('settings.pdfUtility.findTesseract')}
+              onClick={async () => {
+                try {
+                  const pathToTesseract = await which('tesseract');
+                  if (pathToTesseract) {
+                    tessPathRef.current.value = pathToTesseract;
+                    updateSetting('pdfExportImageTesseractPath', pathToTesseract);
+                  } else {
+                    new Notice(t('settings.pdfUtility.findTesseract.fail'));
+                  }
+                } catch (e) {
+                  new Notice(t('settings.pdfUtility.findTesseract.fail'));
+                  console.error(e);
+                }
+              }}
+            >
+              <Icon name="magnifying-glass" />
+            </div>
+          </SettingItem>
+          <SettingItem
+            name={t('settings.imageOCR.lang')}
+            description={
+              <div>
+                {t('settings.imageOCR.lang.desc1')} <pre>eng+deu</pre>. {t('settings.imageOCR.lang.desc2')}{' '}
+                <a href="https://github.com/tesseract-ocr/tessdata" target="_blank" rel="noreferrer">{t('settings.imageOCR.lang.desc3')}</a>
+                . ({' '}
+                <a href="https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html" target="_blank" rel="noreferrer">{t('settings.imageOCR.lang.desc4')}</a>
+                )
+              </div>
+            }
+          >
+            <input
+              onChange={(e) => updateSetting('pdfExportImageOCRLang', (e.target as HTMLInputElement).value)}
+              type="text"
+              defaultValue={settings.pdfExportImageOCRLang}
+            />
+          </SettingItem>
+          <SettingItem name={t('settings.imageOCR.tessDataDir')} description={t('settings.imageOCR.tessDataDir.desc')}>
+            <input
+              ref={tessDataPathRef}
+              onChange={(e) => updateSetting('pdfExportImageTessDataDir', (e.target as HTMLInputElement).value)}
+              type="text"
+              defaultValue={settings.pdfExportImageTessDataDir}
+            />
+            <div
+              className="clickable-icon setting-editor-extra-setting-button"
+              aria-label={t('settings.pdfUtility.selectTessDataDir')}
+              onClick={() => {
+                const path = require('electron').remote.dialog.showOpenDialogSync({ properties: ['openDirectory'] });
+                if (path && path.length) {
+                  tessDataPathRef.current.value = path[0];
+                  updateSetting('pdfExportImageTessDataDir', path[0]);
+                }
+              }}
+            >
+              <Icon name="lucide-folder-open" />
+            </div>
+          </SettingItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Tab 2：笔记模板（Notes Template）React 组件 ──
+
+interface NotesTabProps {
+  settings: ZoteroConnectorSettings;
+  addExportFormat: (format: ExportFormat) => ExportFormat[];
+  updateExportFormat: (index: number, format: ExportFormat) => ExportFormat[];
+  removeExportFormat: (index: number) => ExportFormat[];
+  updateSetting: (key: keyof ZoteroConnectorSettings, value: any) => void;
+  saveBodyTemplate: (value: string) => void;
+}
+
+function NotesTab({
+  settings,
+  addExportFormat,
+  updateExportFormat,
+  removeExportFormat,
+  updateSetting,
+  saveBodyTemplate,
+}: NotesTabProps) {
+  const [exportFormatState, setExportFormatState] = React.useState(settings.exportFormats);
+  const [openNoteAfterImportState, setOpenNoteAfterImport] = React.useState(!!settings.openNoteAfterImport);
+  const [concat, setConcat] = React.useState(!!settings.shouldConcat);
+
+  const updateExport = React.useCallback(
+    debounce((index: number, format: ExportFormat) => {
+      setExportFormatState(updateExportFormat(index, format));
+    }, 200, true),
+    [updateExportFormat]
+  );
+
+  const addExport = React.useCallback(() => {
+    setExportFormatState(
+      addExportFormat({
+        name: `Import #${exportFormatState.length + 1}`,
+        outputPathTemplate: '{{citekey}}.md',
+        imageOutputPathTemplate: '{{citekey}}/',
+        imageBaseNameTemplate: 'image',
+      })
+    );
+  }, [addExportFormat, exportFormatState]);
+
+  const removeExport = React.useCallback((index: number) => {
+    setExportFormatState(removeExportFormat(index));
+  }, [removeExportFormat]);
+
+  return (
+    <div>
+      {/* 正文模板 */}
+      <SettingItem name={t('settings.notes.bodyTemplate')} description={t('settings.notes.bodyTemplate.desc')} isHeading />
+      <textarea
+        className="zt-body-template-textarea"
+        placeholder={'## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}'}
+        defaultValue={settings.bodyTemplate || ''}
+        onInput={(e) => saveBodyTemplate((e.target as HTMLTextAreaElement).value)}
+        style={{
+          width: '100%', minHeight: '200px', fontFamily: 'var(--font-monospace)',
+          fontSize: '0.85em', marginBottom: '16px',
+        }}
+      />
+
+      {/* 导入行为 */}
+      <SettingItem name={t('settings.notes.importBehavior')} isHeading />
+
       <SettingItem name={t('settings.openAfterImport')} description={t('settings.openAfterImport.desc')}>
         <div
           onClick={() => setOpenNoteAfterImport((s) => { updateSetting('openNoteAfterImport', !s); return !s; })}
@@ -338,14 +339,7 @@ function SettingsComponent({
         />
       </SettingItem>
 
-      <SettingItem name={t('settings.citeFormats')} isHeading />
-      <SettingItem>
-        <button onClick={addCite} className="mod-cta">{t('settings.addCiteFormat')}</button>
-      </SettingItem>
-      {citeFormatState.map((f, i) => (
-        <CiteFormatSettings key={i} format={f} index={i} updateFormat={updateCite} removeFormat={removeCite} />
-      ))}
-
+      {/* 导入格式 */}
       <SettingItem name={t('settings.importFormats')} isHeading />
       <SettingItem>
         <button onClick={addExport} className="mod-cta">{t('settings.addImportFormat')}</button>
@@ -353,7 +347,72 @@ function SettingsComponent({
       {exportFormatState.map((f, i) => (
         <ExportFormatSettings key={exportFormatState.length - i} format={f} index={i} updateFormat={updateExport} removeFormat={removeExport} />
       ))}
+    </div>
+  );
+}
 
+// ── Tab 3：引注格式（Citation Format）React 组件 ──
+
+interface CitationTabProps {
+  settings: ZoteroConnectorSettings;
+  addCiteFormat: (format: CitationFormat) => CitationFormat[];
+  updateCiteFormat: (index: number, format: CitationFormat) => CitationFormat[];
+  removeCiteFormat: (index: number) => CitationFormat[];
+  updateSetting: (key: keyof ZoteroConnectorSettings, value: any) => void;
+}
+
+function CitationTab({
+  settings,
+  addCiteFormat,
+  updateCiteFormat,
+  removeCiteFormat,
+  updateSetting,
+}: CitationTabProps) {
+  const [citeFormatState, setCiteFormatState] = React.useState(settings.citeFormats);
+
+  const updateCite = React.useCallback(
+    debounce((index: number, format: CitationFormat) => {
+      setCiteFormatState(updateCiteFormat(index, format));
+    }, 200, true),
+    [updateCiteFormat]
+  );
+
+  const addCite = React.useCallback(() => {
+    setCiteFormatState(
+      addCiteFormat({ name: `Format #${citeFormatState.length + 1}`, format: 'formatted-citation' })
+    );
+  }, [addCiteFormat, citeFormatState]);
+
+  const removeCite = React.useCallback((index: number) => {
+    setCiteFormatState(removeCiteFormat(index));
+  }, [removeCiteFormat]);
+
+  return (
+    <div>
+      <SettingItem
+        name={t('settings.citation.formats')}
+        description={t('settings.citation.formats.desc')}
+        isHeading
+      />
+
+      <SettingItem>
+        <button onClick={addCite} className="mod-cta">{t('settings.addCiteFormat')}</button>
+      </SettingItem>
+      {citeFormatState.map((f, i) => (
+        <CiteFormatSettings key={i} format={f} index={i} updateFormat={updateCite} removeFormat={removeCite} />
+      ))}
+
+      <SettingItem
+        name={t('settings.citation.suggestTemplate')}
+        description={t('settings.citation.suggestTemplate.desc')}
+      >
+        <input
+          onChange={(e) => updateSetting('citeSuggestTemplate', (e.target as HTMLInputElement).value)}
+          type="text"
+          spellCheck={false}
+          defaultValue={settings.citeSuggestTemplate || '[[{{citekey}}]]'}
+        />
+      </SettingItem>
     </div>
   );
 }
@@ -363,12 +422,12 @@ function SettingsComponent({
 export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   plugin: ZoteroConnector;
   dbTimer: number;
-  activeTab: TabId = 'general';
+  activeTab: TabId = 'metadata';
+  private systemHeader: HTMLElement | null = null;
   private tabButtons: HTMLElement | null = null;
-  private generalContainer: HTMLElement | null = null;
-  private storageContainer: HTMLElement | null = null;
-  private beautifyContainer: HTMLElement | null = null;
-  private templateContainer: HTMLElement | null = null;
+  private metadataContainer: HTMLElement | null = null;
+  private notesContainer: HTMLElement | null = null;
+  private citationContainer: HTMLElement | null = null;
 
   constructor(app: App, plugin: ZoteroConnector) {
     super(app, plugin);
@@ -378,6 +437,16 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+
+    // ── 系统设置区（始终可见）──
+    this.systemHeader = containerEl.createDiv();
+    ReactDOM.render(
+      <SystemHeader
+        settings={this.plugin.settings}
+        updateSetting={this.updateSetting}
+      />,
+      this.systemHeader
+    );
 
     // ── Tab 导航栏 ──
     this.tabButtons = containerEl.createDiv('zt-tab-bar');
@@ -406,56 +475,71 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     });
 
     // ── 内容容器 ──
-    this.generalContainer = containerEl.createDiv();
-    this.storageContainer = containerEl.createDiv();
-    this.beautifyContainer = containerEl.createDiv();
-    this.templateContainer = containerEl.createDiv();
+    this.metadataContainer = containerEl.createDiv();
+    this.notesContainer = containerEl.createDiv();
+    this.citationContainer = containerEl.createDiv();
 
     // ── 渲染各 Tab ──
-    this._renderGeneralTab(this.generalContainer);
-    this._renderStorageTab(this.storageContainer);
-    this._renderBeautifyTab(this.beautifyContainer);
-    this._renderTemplateTab(this.templateContainer);
+    this._renderMetadataTab(this.metadataContainer);
+    this._renderNotesTab(this.notesContainer);
+    this._renderCitationTab(this.citationContainer);
 
     // ── 显示/隐藏 ──
     this._showActiveTab();
   }
 
   private _showActiveTab() {
-    if (this.generalContainer)
-      this.generalContainer.style.display = this.activeTab === 'general' ? 'block' : 'none';
-    if (this.storageContainer)
-      this.storageContainer.style.display = this.activeTab === 'storage' ? 'block' : 'none';
-    if (this.beautifyContainer)
-      this.beautifyContainer.style.display = this.activeTab === 'beautify' ? 'block' : 'none';
-    if (this.templateContainer)
-      this.templateContainer.style.display = this.activeTab === 'template' ? 'block' : 'none';
+    if (this.metadataContainer)
+      this.metadataContainer.style.display = this.activeTab === 'metadata' ? 'block' : 'none';
+    if (this.notesContainer)
+      this.notesContainer.style.display = this.activeTab === 'notes' ? 'block' : 'none';
+    if (this.citationContainer)
+      this.citationContainer.style.display = this.activeTab === 'citation' ? 'block' : 'none';
   }
 
-  // ── General Tab ──
+  // ── Tab 1：元数据映射 ──
 
-  private _renderGeneralTab(container: HTMLElement) {
+  private _renderMetadataTab(container: HTMLElement) {
+    container.empty();
+
+    // Property Mappings（使用原生 Setting API，保留拖拽排序）
+    this._renderPropertyMappings(container);
+
+    // IF Color Rules
+    this._renderIfColorRules(container);
+
+    // Title Marquee
+    this._renderTitleMarquee(container);
+  }
+
+  // ── Tab 2：笔记模板 ──
+
+  private _renderNotesTab(container: HTMLElement) {
     ReactDOM.render(
-      <SettingsComponent
+      <NotesTab
         settings={this.plugin.settings}
-        addCiteFormat={this.addCiteFormat}
-        updateCiteFormat={this.updateCiteFormat}
-        removeCiteFormat={this.removeCiteFormat}
         addExportFormat={this.addExportFormat}
         updateExportFormat={this.updateExportFormat}
         removeExportFormat={this.removeExportFormat}
         updateSetting={this.updateSetting}
+        saveBodyTemplate={(value) => {
+          this.plugin.settings.bodyTemplate = value;
+          this.debouncedSave();
+        }}
       />,
       container
     );
   }
 
-  // ── Storage Tab ──
+  // ── Tab 3：引注格式 ──
 
-  private _renderStorageTab(container: HTMLElement) {
+  private _renderCitationTab(container: HTMLElement) {
     ReactDOM.render(
-      <StorageSettings
+      <CitationTab
         settings={this.plugin.settings}
+        addCiteFormat={this.addCiteFormat}
+        updateCiteFormat={this.updateCiteFormat}
+        removeCiteFormat={this.removeCiteFormat}
         updateSetting={this.updateSetting}
       />,
       container
@@ -516,13 +600,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     this.debouncedSave();
   };
 
-  // ── Beautify Tab ──
-
-  private _renderBeautifyTab(container: HTMLElement) {
-    container.empty();
-    this._renderIfColorRules(container);
-    this._renderTitleMarquee(container);
-  }
+  // ── IF Color Rules（保留原生 Setting API）──
 
   private _renderIfColorRules(container: HTMLElement) {
     const existing = container.querySelector('#zotero-if-rules-container');
@@ -629,6 +707,8 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     });
   }
 
+  // ── Title Marquee ──
+
   private _renderTitleMarquee(container: HTMLElement) {
     const existing = container.querySelector('#zotero-title-marquee-container');
     if (existing) existing.remove();
@@ -672,16 +752,9 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
       );
   }
 
-  // ── Template Tab ──
-
-  private _renderTemplateTab(container: HTMLElement) {
-    container.empty();
-    this._renderBodyTemplate(container);
-    this._renderPropertyMappings(container);
-  }
+  // ── Property Mappings（保留拖拽排序 + 原生 Setting API）──
 
   private _renderPropertyMappings(container: HTMLElement) {
-    // 保存滚动位置
     const scrollTop = container.scrollTop;
 
     const existing = container.querySelector('#zotero-property-mappings-container');
@@ -691,8 +764,8 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     wrapper.id = 'zotero-property-mappings-container';
 
     new Setting(wrapper)
-      .setName(t('settings.template.mappings'))
-      .setDesc(t('settings.template.mappings.desc'))
+      .setName(t('settings.metadata.propertyMappings'))
+      .setDesc(t('settings.metadata.propertyMappings.desc'))
       .setHeading();
 
     new Setting(wrapper).addButton((btn) =>
@@ -700,7 +773,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
         .setButtonText(t('settings.template.addMapping'))
         .setCta()
         .onClick(() => {
-          // 保存当前滚动位置
           const currentScrollTop = container.scrollTop;
 
           const mappings = [...(this.plugin.settings.propertyMappings || [])];
@@ -714,7 +786,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
           this.debouncedSave();
           this._renderPropertyMappings(container);
 
-          // 恢复滚动位置
           requestAnimationFrame(() => {
             container.scrollTop = currentScrollTop;
           });
@@ -741,7 +812,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
 
       const settingItem = new Setting(wrapper);
 
-      // 添加拖拽按钮（六个点）在最左侧
+      // 拖拽手柄
       settingItem.addExtraButton((btn) => {
         btn.setIcon('grip-vertical').setTooltip('拖拽排序');
         const handle = btn.extraSettingsEl;
@@ -749,7 +820,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
         handle.style.cursor = 'grab';
         handle.draggable = true;
 
-        // 拖拽开始
         handle.addEventListener('dragstart', (e: DragEvent) => {
           e.dataTransfer!.effectAllowed = 'move';
           e.dataTransfer!.setData('text/plain', i.toString());
@@ -757,18 +827,15 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
           handle.style.cursor = 'grabbing';
         });
 
-        // 拖拽结束
         handle.addEventListener('dragend', () => {
           settingItem.settingEl.removeClass('is-dragging');
           handle.style.cursor = 'grab';
         });
       });
 
-      // 设置拖拽目标事件
       settingItem.settingEl.addEventListener('dragover', (e: DragEvent) => {
         e.preventDefault();
         e.dataTransfer!.dropEffect = 'move';
-        // 添加拖拽悬停样式
         settingItem.settingEl.addClass('zt-drag-over');
       });
 
@@ -800,7 +867,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
             updateMapping({ zoteroField: value });
             this._renderPropertyMappings(container);
           });
-          // 固定宽度，不使用 maxWidth
           dropdown.selectEl.style.width = '160px';
           dropdown.selectEl.style.flexShrink = '0';
         })
@@ -809,7 +875,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
             .setValue(mapping.obsidianKey)
             .setPlaceholder(t('settings.template.obsidianKey'))
             .onChange((value) => updateMapping({ obsidianKey: value }));
-          // 使用 flex: 1 让输入框充分占据剩余空间
           text.inputEl.style.flex = '1';
           text.inputEl.style.minWidth = '0';
         })
@@ -827,43 +892,12 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
               this.debouncedSave();
               this._renderPropertyMappings(container);
 
-              // 恢复滚动位置
               requestAnimationFrame(() => {
                 scrollContainer.scrollTop = scrollTop;
               });
             })
         );
     });
-  }
-
-  private _renderBodyTemplate(container: HTMLElement) {
-    const existing = container.querySelector('#zotero-body-template-container');
-    if (existing) existing.remove();
-
-    const wrapper = container.createDiv('zotero-body-template-container');
-    wrapper.id = 'zotero-body-template-container';
-
-    new Setting(wrapper)
-      .setName(t('settings.template.bodyTemplate'))
-      .setDesc(t('settings.template.bodyTemplate.desc'))
-      .setHeading();
-
-    const textarea = wrapper.createEl('textarea', {
-      attr: { placeholder: '## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}' },
-      cls: 'zt-body-template-textarea',
-    });
-    Object.assign(textarea.style, {
-      width: '100%', minHeight: '200px',
-      fontFamily: 'var(--font-monospace)', fontSize: '0.85em',
-    });
-    textarea.value = this.plugin.settings.bodyTemplate || '';
-
-    const saveBodyTemplate = debounce((value: string) => {
-      this.plugin.settings.bodyTemplate = value;
-      this.debouncedSave();
-    }, 300, true);
-
-    textarea.addEventListener('input', () => saveBodyTemplate(textarea.value));
   }
 
   // ── save ──

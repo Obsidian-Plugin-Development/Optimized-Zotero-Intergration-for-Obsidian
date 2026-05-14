@@ -45,24 +45,24 @@ function extractTitleSmart(item: any): string {
   return rawTitle;
 }
 
-function extractAuthorsSmart(item: any): string {
+function extractAuthorsSmart(item: any): string[] {
   const creators = item.creators || [];
-  if (creators.length === 0) return '';
+  if (creators.length === 0) return [];
 
   const firstAuthor = creatorFullName(creators[0]);
 
   if (creators.length === 1) {
-    return firstAuthor;
+    return [`${firstAuthor} \u2020 \u2709\uFE0E`];
   }
 
   const lastCreator = creators[creators.length - 1];
   const corresponding = creatorFullName(lastCreator);
 
   if (creators.length === 2) {
-    return `${firstAuthor}, ${corresponding} ✉︎`;
+    return [`${firstAuthor} \u2020`, `${corresponding} \u2709\uFE0E`];
   }
 
-  return `${firstAuthor}, et al., ${corresponding} ✉︎`;
+  return [`${firstAuthor} \u2020`, `${corresponding} \u2709\uFE0E`, 'et al.'];
 }
 
 function extractYear(item: any): string {

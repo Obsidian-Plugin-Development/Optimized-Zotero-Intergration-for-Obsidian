@@ -8,61 +8,50 @@ import { exec } from 'child_process';
 import { t } from './locale/i18n';
 
 export function getCurrentWindow() {
-  return require('electron').remote.BrowserWindow.getFocusedWindow();
+  try {
+    return require('electron').remote.getCurrentWindow();
+  } catch {
+    return null;
+  }
 }
 
 /**
- * 将 Obsidian 窗口强制拉回屏幕最顶层。
- * 双保险策略：Electron API 立即执行 + OS 级命令兜底，
- * 确保 Zotero 弹窗关闭后 Obsidian 能可靠地回到前台。
+ * 将 Obsidian 窗口拉回屏幕最顶层。
+ * 移除 setAlwaysOnTop（会导致 z-order 混乱，遮挡 Zotero 弹窗）。
+ * Windows 上直接使用 Electron BrowserWindow API 即可，无需 PowerShell。
+ * macOS 保留 osascript 兜底。
  */
 export function bringObsidianToFront(win?: any) {
-  // 第一层：Electron BrowserWindow API（同步，立即生效）
   if (win) {
     try {
-      win.setAlwaysOnTop(true, 'floating');
+      if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
     } catch {
-      win.show();
+      // 静默失败
     }
   }
 
-  // 第二层：OS 级应用激活命令（异步兜底，突破 OS 防焦点窃取）
+  // macOS: osascript 兜底
   try {
     if (process.platform === 'darwin') {
       exec(`osascript -e 'tell application "Obsidian" to activate'`, (err) => {
         if (err) console.debug('bringObsidianToFront macOS:', err.message);
       });
-    } else if (process.platform === 'win32') {
-      exec(
-        `powershell -NoProfile -Command "$s=(New-Object -ComObject wscript.shell);(Get-Process obsidian -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowTitle}).ForEach({$s.AppActivate($_.Id)})"`,
-        (err) => {
-          if (err) console.debug('bringObsidianToFront Windows:', err.message);
-        }
-      );
     }
   } catch {}
-
-  // 延迟取消 alwaysOnTop，给 OS 级命令足够的执行时间
-  if (win) {
-    setTimeout(() => {
-      try { win.setAlwaysOnTop(false); } catch {}
-    }, 500);
-  }
 }
 
 /**
- * 强制将 Zotero 主窗口激活并置于屏幕最顶层。
- * 在触发 Zotero 文献选择弹窗前调用，以避免系统「防焦点窃取」机制导致弹窗被隐藏；
- * 同时确保弹窗打开后键盘焦点正确，Enter 键可正常确认选择。
+ * 授权 Zotero 设置前台窗口，让 CAYW 弹窗能突破 Windows 焦点窃取防护。
+ * Windows: AllowSetForegroundWindow(zoteroPid) — 仅授权，不做窗口位置/状态干预
+ * macOS: osascript activate
  *
- * 返回 Promise，调用方应 await 以确保 Zotero 聚焦完成后再发送 HTTP 请求。
- * 内置 3 秒超时保护，防止系统脚本异常导致流程永久阻塞。
+ * 返回 Promise，内置 2 秒超时保护。
  */
 export function focusZotero(database: string = 'Zotero'): Promise<void> {
   const appName = database === 'Juris-M' ? 'Juris-M' : 'Zotero';
-  const TIMEOUT_MS = 3000;
+  const TIMEOUT_MS = 2000;
 
   const doFocus = new Promise<void>((resolve) => {
     try {
@@ -76,7 +65,7 @@ export function focusZotero(database: string = 'Zotero'): Promise<void> {
         );
       } else if (process.platform === 'win32') {
         exec(
-          `powershell -NoProfile -Command "$s=(New-Object -ComObject wscript.shell);$s.AppActivate('${appName}')"`,
+          `powershell -NoProfile -Command "$c=Add-Type -MemberDefinition '[DllImport(\\\"user32.dll\\\")]public static extern bool AllowSetForegroundWindow(uint pid);' -Name 'W' -Namespace 'N' -PassThru;$p=Get-Process -Name '${appName}' -ErrorAction SilentlyContinue|Where-Object{$_.Id}|Select-Object -First 1;if($p){$c::AllowSetForegroundWindow($p.Id)}"`,
           (err) => {
             if (err) console.debug('focusZotero Windows:', err.message);
             resolve();

@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync } from 'fs';
-import { Notice, TFile, htmlToMarkdown, moment, normalizePath } from 'obsidian';
+import { Notice, TFile, htmlToMarkdown, moment, normalizePath, parseYaml } from 'obsidian';
 import path from 'path';
 
 import { t } from '../locale/i18n';
@@ -36,7 +36,7 @@ import {
   getItemJSONFromCiteKeys,
   getItemJSONFromRelations,
 } from './jsonRPC';
-import { mergeFrontmatterContent } from './frontmatter';
+import { extractFrontmatterBlock, mergeFrontmatterContent, removeFrontmatter } from './frontmatter';
 import { extractImpactFactor, matchIfRule } from './styleManager';
 import { PersistExtension, renderTemplate } from './template.env';
 import {
@@ -47,6 +47,72 @@ import {
   removeStartingSlash,
   wrapAnnotationTemplate,
 } from './template.helpers';
+
+// ═══════════════════════════════════════════════
+// v4.0 非破坏性同步 - 边界标记与安全合并
+// ═══════════════════════════════════════════════
+
+/** Zotero 内容区域起始标记 */
+const ZOTERO_START = '%% Zotero_Notes_Start %%';
+/** Zotero 内容区域结束标记 */
+const ZOTERO_END = '%% Zotero_Notes_End %%';
+
+/**
+ * 将生成的 Zotero 正文内容包裹在边界标记之间。
+ */
+function wrapZoteroSection(content: string): string {
+  return `\n${ZOTERO_START}\n${content}\n${ZOTERO_END}\n`;
+}
+
+/**
+ * 从现有文件内容中提取 Zotero 标记区域之外的用户内容。
+ * 返回 { before, after } — 标记前和标记后的内容。
+ * 如果找不到标记，返回 null。
+ */
+function extractUserContent(
+  fileContent: string
+): { before: string; after: string } | null {
+  const startIdx = fileContent.indexOf(ZOTERO_START);
+  const endIdx = fileContent.indexOf(ZOTERO_END);
+
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    return null;
+  }
+
+  return {
+    before: fileContent.slice(0, startIdx),
+    after: fileContent.slice(endIdx + ZOTERO_END.length),
+  };
+}
+
+/**
+ * 安全替换或追加 Zotero 内容区域。
+ *
+ * - 如果文件中已存在标记区域，仅替换标记内的内容，外部内容原封不动。
+ * - 如果文件中不存在标记区域，将新的 Zotero 内容追加到文件末尾。
+ *
+ * @param existingContent - 文件的当前完整内容
+ * @param newZoteroBody   - 新生成的 Zotero 正文内容（不含标记）
+ * @returns 合并后的完整文件内容
+ */
+function replaceOrAppendZoteroSection(
+  existingContent: string,
+  newZoteroBody: string
+): string {
+  const userContent = extractUserContent(existingContent);
+
+  if (userContent) {
+    // 标记存在：仅替换标记内区域，外部用户内容 100% 保留
+    return (
+      userContent.before +
+      wrapZoteroSection(newZoteroBody) +
+      userContent.after
+    );
+  }
+
+  // 标记不存在：在文件末尾追加 Zotero 区域
+  return existingContent.trimEnd() + wrapZoteroSection(newZoteroBody);
+}
 
 async function processNote(
   citeKey: CiteKey,
@@ -904,21 +970,64 @@ export async function exportToMarkdown(
 
       if (!rendered) continue;
 
+      const syncMode = params.syncMode || 'full';
+
       if (file) {
-        // Merge frontmatter: preserve user-added YAML keys from the existing
-        // note while updating Zotero-managed keys with the new rendered values.
-        const merged = mergeFrontmatterContent(fileContent, rendered);
-        await app.vault.modify(file, merged);
+        const updateYaml = syncMode === 'full' || syncMode === 'metadata';
+        const updateBody = syncMode === 'full' || syncMode === 'annotations';
+
+        if (updateYaml) {
+          // ── v4.0 非破坏性 YAML 更新 ──
+          // 使用 processFrontMatter 安全更新 YAML 属性
+          // Obsidian 原生 API：只修改 frontmatter 区域，不动正文
+          const renderedYaml = extractFrontmatterBlock(rendered);
+          if (renderedYaml) {
+            const renderedFm = parseYaml(renderedYaml) || {};
+            await app.fileManager.processFrontMatter(file, (fm: any) => {
+              for (const [key, value] of Object.entries(renderedFm)) {
+                fm[key] = value;
+              }
+            });
+          }
+        }
+
+        if (updateBody) {
+          // ── v4.0 正文区域隔离合并 ──
+          // Zotero 内容包裹在 %% Zotero_Notes_Start/End %% 标记内
+          // 标记外的用户手写笔记 / 批注 100% 保留
+          const renderedBody = removeFrontmatter(rendered);
+          const updatedContent = await app.vault.read(file);
+          const mergedBody = replaceOrAppendZoteroSection(
+            updatedContent,
+            renderedBody
+          );
+          if (mergedBody !== updatedContent) {
+            await app.vault.modify(file, mergedBody);
+          }
+        }
+
         createdOrUpdatedMarkdownFiles.push(markdownPath);
-      } else {
+      } else if (syncMode !== 'metadata' && syncMode !== 'annotations') {
         // ── v3.0 智能多级文件夹路由 ──
         const finalPath = await resolveSmartPath(
           markdownPath,
           item,
           settings.baseStorageFolder
         );
+
+        // v4.0: 确保正文包裹在边界标记内，以便后续导入时安全更新
+        const renderedBody = removeFrontmatter(rendered);
+        const hasMarkers =
+          renderedBody.includes(ZOTERO_START) && renderedBody.includes(ZOTERO_END);
+        const safeContent = hasMarkers
+          ? rendered
+          : rendered.replace(
+              renderedBody,
+              wrapZoteroSection(renderedBody)
+            );
+
         await ensureFolderExists(app.vault, path.posix.dirname(finalPath));
-        await app.vault.create(finalPath, rendered);
+        await app.vault.create(finalPath, safeContent);
         createdOrUpdatedMarkdownFiles.push(finalPath);
       }
     } catch (e) {

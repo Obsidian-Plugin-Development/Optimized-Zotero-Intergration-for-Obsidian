@@ -59,10 +59,15 @@ export interface ExportFormat {
   footerTemplatePath?: string;
 }
 
+/** v4.0: 同步模式控制导出行为 */
+export type SyncMode = 'full' | 'metadata' | 'annotations';
+
 export interface ExportToMarkdownParams {
   settings: ZoteroConnectorSettings;
   database: DatabaseWithPort;
   exportFormat: ExportFormat;
+  /** v4.0: 同步模式。full=完整导入, metadata=仅更新YAML, annotations=仅更新正文 */
+  syncMode?: SyncMode;
 }
 
 export interface RenderCiteTemplateParams {

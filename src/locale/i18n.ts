@@ -183,6 +183,12 @@ const en: StringMap = {
   'command.importNotes': 'Import notes',
   'command.dataExplorer': 'Data explorer',
   'command.quickImport': 'Quick Import (Visual Mappings)',
+  'command.updateMetadata': 'Update Metadata (YAML only)',
+  'command.syncAnnotations': 'Sync Annotations (Body only)',
+  'command.copyCitation': 'Copy Citation to Clipboard',
+  'command.insertItemInfo': 'Insert Item Info (YAML)',
+  'command.insertAnnotations': 'Insert Notes & Annotations',
+  'command.insertBibliography': 'Insert Bibliography',
 
   // ── 模态框 / 提示 ──
   'modal.fetchingData': 'Fetching data from Zotero...',
@@ -222,6 +228,15 @@ const en: StringMap = {
   'notice.importFormatNotFound': 'Error: Import format "%s" not found',
   'notice.noTemplates':
     'No templates found for export %s',
+  'notice.metadataUpdated': 'Metadata YAML updated for %s file(s).',
+  'notice.annotationsSynced': 'Annotations synced for %s file(s).',
+  'notice.citationCopied': 'Citation "%s" copied to clipboard.',
+  'notice.noFilesToUpdate':
+    'No existing files found. Run a full import first.',
+  'notice.noCitationReturned': 'No citation returned from Zotero.',
+  'notice.itemInfoInserted': 'Inserted YAML info for %s item(s).',
+  'notice.annotationsInserted': 'Inserted notes for %s item(s).',
+  'notice.bibInserted': 'Inserted bibliography for %s item(s).',
 
   // ── 模板错误 ──
   'error.parsingTemplate': 'Error parsing template "%s":',
@@ -251,13 +266,35 @@ const en: StringMap = {
   'settings.titleMarquee.duration.desc':
     'Time in seconds for one complete scroll cycle. Default: 15s.',
 
-  // ── 多 Tab 设置面板 ──
-  'settings.tab.general': 'General',
-  'settings.tab.storage': 'Storage',
-  'settings.tab.beautify': 'Beautify',
-  'settings.tab.template': 'Template',
+  // ── v4.0 工作流导向 Tab ──
+  'settings.tab.metadata': 'Metadata Mapping',
+  'settings.tab.notes': 'Notes Template',
+  'settings.tab.citation': 'Citation Format',
 
-  // ── Template Tab ──
+  // ── System Header ──
+  'settings.system': 'System Settings',
+  'settings.advanced': 'Advanced (Image & OCR)',
+
+  // ── Metadata Tab ──
+  'settings.metadata.propertyMappings': 'Property Mappings',
+  'settings.metadata.propertyMappings.desc':
+    'Map Zotero fields to Obsidian YAML properties. Drag ⋮⋮ to reorder. These become the frontmatter of each imported note.',
+
+  // ── Notes Tab ──
+  'settings.notes.bodyTemplate': 'Body Template',
+  'settings.notes.bodyTemplate.desc':
+    'Template for the note body. Supports {{placeholder}} syntax. Rendered inside the Zotero content zone below the YAML frontmatter.',
+  'settings.notes.importBehavior': 'Import Behavior',
+
+  // ── Citation Tab ──
+  'settings.citation.formats': 'Citation Formats',
+  'settings.citation.formats.desc':
+    'Define citation styles available via commands. Pandoc [@key], LaTeX \\cite{key}, formatted text, or custom template.',
+  'settings.citation.suggestTemplate': 'Cite Suggest Template',
+  'settings.citation.suggestTemplate.desc':
+    'Template inserted when selecting a citation via autocomplete. Use {{citekey}} as placeholder.',
+
+  // ── Legacy keys (kept for backward compatibility) ──
   'settings.template.mappings': 'Property Mappings',
   'settings.template.mappings.desc':
     'Map Zotero fields to Obsidian property keys. Choose a Zotero field and enter the Obsidian property name.',
@@ -420,6 +457,12 @@ const zhCN: StringMap = {
   'command.importNotes': '导入笔记',
   'command.dataExplorer': '数据浏览器',
   'command.quickImport': '快速导入（可视化映射）',
+  'command.updateMetadata': '更新文献元数据（仅YAML）',
+  'command.syncAnnotations': '同步笔记与批注（仅正文）',
+  'command.copyCitation': '复制引注占位符到剪贴板',
+  'command.insertItemInfo': '插入条目信息（YAML）',
+  'command.insertAnnotations': '插入笔记与批注',
+  'command.insertBibliography': '插入参考文献',
 
   // ── 模态框 / 提示 ──
   'modal.fetchingData': '正在从 Zotero 获取数据...',
@@ -456,6 +499,15 @@ const zhCN: StringMap = {
   'notice.templateNotFound': '错误：%s 模板未找到 %s',
   'notice.importFormatNotFound': '错误：未找到导入格式 "%s"',
   'notice.noTemplates': '未找到导出格式 %s 的模板',
+  'notice.metadataUpdated': '已更新 %s 个文件的元数据 YAML。',
+  'notice.annotationsSynced': '已同步 %s 个文件的笔记与批注。',
+  'notice.citationCopied': '引注 "%s" 已复制到剪贴板。',
+  'notice.noFilesToUpdate':
+    '未找到已有文件，请先执行一次完整导入。',
+  'notice.noCitationReturned': '未从 Zotero 获取到引注数据。',
+  'notice.itemInfoInserted': '已插入 %s 个条目的 YAML 信息。',
+  'notice.annotationsInserted': '已插入 %s 个条目的笔记。',
+  'notice.bibInserted': '已插入 %s 个条目的参考文献。',
 
   // ── 模板错误 ──
   'error.parsingTemplate': '解析模板 "%s" 时出错：',
@@ -485,13 +537,35 @@ const zhCN: StringMap = {
   'settings.titleMarquee.duration.desc':
     '完成一次完整滚动所需的秒数。默认：15 秒。',
 
-  // ── 多 Tab 设置面板 ──
-  'settings.tab.general': '常规',
-  'settings.tab.storage': '存储',
-  'settings.tab.beautify': '美化',
-  'settings.tab.template': '模板',
+  // ── v4.0 工作流导向 Tab ──
+  'settings.tab.metadata': '元数据映射',
+  'settings.tab.notes': '笔记模板',
+  'settings.tab.citation': '引注格式',
 
-  // ── Template Tab ──
+  // ── System Header ──
+  'settings.system': '系统设置',
+  'settings.advanced': '高级设置（图片与OCR）',
+
+  // ── Metadata Tab ──
+  'settings.metadata.propertyMappings': '属性映射',
+  'settings.metadata.propertyMappings.desc':
+    '将 Zotero 字段映射到 Obsidian YAML 属性。拖拽 ⋮⋮ 排序。这些映射会成为每篇导入笔记的 frontmatter。',
+
+  // ── Notes Tab ──
+  'settings.notes.bodyTemplate': '正文模板',
+  'settings.notes.bodyTemplate.desc':
+    '笔记正文模板。支持 {{placeholder}} 语法。渲染后置于 YAML frontmatter 下方的 Zotero 内容区域内。',
+  'settings.notes.importBehavior': '导入行为',
+
+  // ── Citation Tab ──
+  'settings.citation.formats': '引注格式',
+  'settings.citation.formats.desc':
+    '定义通过命令面板可用的引注样式。支持 Pandoc [@key]、LaTeX \\cite{key}、格式化文本或自定义模板。',
+  'settings.citation.suggestTemplate': '自动补全模板',
+  'settings.citation.suggestTemplate.desc':
+    '通过自动补全选择引用时插入的模板。使用 {{citekey}} 作为占位符。',
+
+  // ── Legacy keys ──
   'settings.template.mappings': '属性映射',
   'settings.template.mappings.desc':
     '将 Zotero 字段映射到 Obsidian 属性键。选择一个 Zotero 字段并输入 Obsidian 属性名称。',
