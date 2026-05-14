@@ -1,22 +1,21 @@
 import Fuse from 'fuse.js';
-import { EditableFileView, Events, Notice, Plugin, TFile, htmlToMarkdown } from 'obsidian';
+import { EditableFileView, Editor, Events, Notice, Plugin, TFile, htmlToMarkdown } from 'obsidian';
 import { shellPath } from 'shell-path';
 
 import { DataExplorerView, viewType } from './DataExplorerView';
 import { LoadingModal } from './bbt/LoadingModal';
-import { getCAYW, getCiteKeys } from './bbt/cayw';
+import { getCiteKeys } from './bbt/cayw';
 import {
   injectBeautifyStyles,
   removeBeautifyStyles,
 } from './bbt/styleManager';
-import { exportToMarkdown, renderCiteTemplate } from './bbt/export';
+import { exportToMarkdown } from './bbt/export';
 import {
   filesFromNotes,
   insertNotesIntoCurrentDoc,
   noteExportPrompt,
 } from './bbt/exportNotes';
-import { getItemJSONFromCiteKeys, getIssueDateFromCiteKey, getBibFromCiteKeys } from './bbt/jsonRPC';
-import { buildPropertyRecord, recordToYaml } from './bbt/templateEngine';
+import { getBibFromCiteKeys } from './bbt/jsonRPC';
 import { SyncFloatingButton } from './bbt/SyncFloatingButton';
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
@@ -27,7 +26,6 @@ import {
 } from './settings/AssetDownloader';
 import { ZoteroConnectorSettingsTab } from './settings/settings';
 import {
-  CitationFormat,
   CiteKeyExport,
   ExportFormat,
   PropertyItem,
@@ -35,7 +33,6 @@ import {
 } from './types';
 
 const commandPrefix = 'obsidian-zotero-desktop-connector:';
-const citationCommandIDPrefix = 'zdc-';
 const exportCommandIDPrefix = 'zdc-exp-';
 const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   database: 'Zotero',
@@ -44,9 +41,7 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   pdfExportImageDPI: 120,
   pdfExportImageFormat: 'jpg',
   pdfExportImageQuality: 90,
-  citeFormats: [],
   exportFormats: [],
-  citeSuggestTemplate: '[[{{citekey}}]]',
   ifColorRules: [],
   titleMarqueeEnabled: false,
   titleMarqueeDuration: 15,
@@ -58,7 +53,9 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   ],
   triggerFeatureKey: '文献标题',
   triggerFeatureValue: '',
+  syncTargets: ['metadata'],
   floatingButtonCommands: ['zdc-update-metadata'],
+  cslStyle: '',
   autoSyncOnOpen: false,
   bodyTemplate: '## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}',
   openNoteAfterImport: false,
@@ -117,20 +114,38 @@ export default class ZoteroConnector extends Plugin {
     this.addSettingTab(new ZoteroConnectorSettingsTab(this.app, this));
     this.registerView(viewType, (leaf) => new DataExplorerView(this, leaf));
 
-    this.settings.citeFormats.forEach((f) => {
-      this.addFormatCommand(f);
-    });
-
     this.settings.exportFormats.forEach((f) => {
       this.addExportCommand(f);
     });
 
-    // ── v4.0：三个插入当前笔记的命令 ──
+    // ── v6.0：智能同步 + 行内引注 + 参考文献生成 ──
 
-    // 命令：插入条目信息（YAML frontmatter）
+    // 命令 1：智能同步（根据 syncTargets 执行 metadata + annotations 更新）
     this.addCommand({
-      id: 'zdc-insert-item-info',
-      name: t('command.insertItemInfo'),
+      id: 'zdc-smart-sync',
+      name: t('command.smartSync'),
+      editorCallback: async (editor) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) return;
+        const cache = this.app.metadataCache.getFileCache(file);
+        const citeKey = (cache?.frontmatter?.citekey || cache?.frontmatter?.citationKey || file.basename) as string;
+        if (!citeKey) {
+          new Notice('⚠️ 无法从当前文件提取 citeKey', 4000);
+          return;
+        }
+        try {
+          await this.runSilentAutoSync(citeKey, 1, file.path);
+          new Notice(t('notice.autoSyncCompleted'), 3000);
+        } catch (e) {
+          new Notice(t('notice.autoSyncFailed'), 4000);
+        }
+      },
+    });
+
+    // 命令 A：插入文中引注 — 直接插入 [@citekey] 纯文本
+    this.addCommand({
+      id: 'zdc-insert-inline-citation',
+      name: t('command.insertInlineCitation'),
       editorCallback: async (editor) => {
         const database = {
           database: this.settings.database,
@@ -139,33 +154,9 @@ export default class ZoteroConnector extends Plugin {
         try {
           const citeKeys = await getCiteKeys(database);
           if (!citeKeys.length) return;
-
-          const libraryID = citeKeys[0].library;
-          const itemData = await getItemJSONFromCiteKeys(citeKeys, database, libraryID);
-          if (!itemData?.length) return;
-
-          const results: string[] = [];
-          for (const item of itemData) {
-            try {
-              item.date = await getIssueDateFromCiteKey(
-                { key: item.citekey || item.key, library: libraryID },
-                database
-              );
-            } catch { /* date is optional */ }
-
-            const record = buildPropertyRecord(
-              item,
-              this.settings.propertyItems || [],
-              this.settings.ifColorRules || []
-            );
-            results.push(recordToYaml(record));
-          }
-
-          editor.replaceSelection(results.join('\n\n'));
-          new Notice(
-            t('notice.itemInfoInserted', String(results.length)),
-            3000
-          );
+          const refs = citeKeys.map((k) => `[@${k.key}]`).join('; ');
+          editor.replaceSelection(refs);
+          new Notice(t('notice.inlineCitationInserted'), 3000);
         } catch (e) {
           new Notice(
             `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
@@ -175,61 +166,16 @@ export default class ZoteroConnector extends Plugin {
       },
     });
 
-    // 命令：插入笔记与批注（Zotero notes + PDF annotations）
+    // 命令 B：扫描 [@citekey] 引用，批量生成/更新参考文献列表
     this.addCommand({
-      id: 'zdc-insert-annotations',
-      name: t('command.insertAnnotations'),
-      editorCallback: (editor) => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        noteExportPrompt(
-          database,
-          this.app.workspace.getActiveFile()?.parent.path
-        ).then((notes) => {
-          if (notes) {
-            insertNotesIntoCurrentDoc(editor, notes);
-            new Notice(
-              t('notice.annotationsInserted', String(Object.keys(notes).length)),
-              3000
-            );
-          }
-        });
-      },
-    });
-
-    // 命令：插入参考文献（formatted bibliography）
-    this.addCommand({
-      id: 'zdc-insert-bibliography',
-      name: t('command.insertBibliography'),
+      id: 'zdc-generate-bibliography',
+      name: t('command.generateBibliography'),
       editorCallback: async (editor) => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        try {
-          const citeKeys = await getCiteKeys(database);
-          if (!citeKeys.length) return;
-
-          const bib = await getBibFromCiteKeys(citeKeys, database);
-          if (bib) {
-            // getBibFromCiteKeys returns HTML; convert to Markdown
-            const markdownBib = htmlToMarkdown(bib);
-            editor.replaceSelection(markdownBib);
-            new Notice(
-              t('notice.bibInserted', String(citeKeys.length)),
-              3000
-            );
-          }
-        } catch (e) {
-          new Notice(
-            `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
-            5000
-          );
-        }
+        await this.generateBibliographyForEditor(editor);
       },
     });
+
+    // ── v4.0 保留命令 ──
 
     this.addCommand({
       id: 'zdc-insert-notes',
@@ -270,171 +216,6 @@ export default class ZoteroConnector extends Plugin {
     });
 
     this.addCommand({
-      id: 'zdc-quick-import',
-      name: t('command.quickImport'),
-      callback: async () => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        const plainExportFormat: ExportFormat = {
-          name: '__quick_import__',
-          outputPathTemplate: '{{citekey}}.md',
-          imageOutputPathTemplate: '{{citekey}}/',
-          imageBaseNameTemplate: 'image',
-        };
-        const progressNotice = new Notice('', 0);
-        try {
-          const paths = await exportToMarkdown(
-            { settings: this.settings, database, exportFormat: plainExportFormat },
-            undefined,
-            ({ macro, micro }) => {
-              progressNotice.noticeEl.empty();
-              progressNotice.noticeEl.createSpan({ text: macro });
-              if (micro) {
-                progressNotice.noticeEl.createEl('br');
-                const microEl = progressNotice.noticeEl.createSpan({
-                  text: micro,
-                });
-                microEl.style.fontSize = '0.85em';
-                microEl.style.opacity = '0.8';
-              }
-            }
-          );
-          progressNotice.noticeEl.empty();
-          progressNotice.noticeEl.createSpan({
-            text: `✅ 导入完成：${paths.length} 篇文献`,
-          });
-          setTimeout(() => progressNotice.hide(), 3000);
-          this.openNotes(paths);
-        } catch (e) {
-          progressNotice.noticeEl.empty();
-          progressNotice.noticeEl.createSpan({
-            text: `❌ 导入失败：${e instanceof Error ? e.message : '未知错误'}`,
-          });
-          setTimeout(() => progressNotice.hide(), 5000);
-        }
-      },
-    });
-
-    // ── v4.0 模块二：三个解耦命令 ──
-
-    // 命令 1：仅更新 YAML 元数据（不触碰正文）
-    this.addCommand({
-      id: 'zdc-update-metadata',
-      name: t('command.updateMetadata'),
-      callback: async () => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        const plainExportFormat: ExportFormat = {
-          name: '__update_metadata__',
-          outputPathTemplate: '{{citekey}}.md',
-          imageOutputPathTemplate: '{{citekey}}/',
-          imageBaseNameTemplate: 'image',
-        };
-        const progressNotice = new Notice('', 0);
-        try {
-          const paths = await exportToMarkdown(
-            { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'metadata' },
-            undefined,
-            ({ macro }) => {
-              progressNotice.noticeEl.empty();
-              progressNotice.noticeEl.createSpan({ text: macro });
-            }
-          );
-          progressNotice.noticeEl.empty();
-          progressNotice.noticeEl.createSpan({
-            text: paths.length > 0
-              ? t('notice.metadataUpdated', String(paths.length))
-              : t('notice.noFilesToUpdate'),
-          });
-          setTimeout(() => progressNotice.hide(), 4000);
-        } catch (e) {
-          progressNotice.noticeEl.empty();
-          progressNotice.noticeEl.createSpan({
-            text: `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
-          });
-          setTimeout(() => progressNotice.hide(), 5000);
-        }
-      },
-    });
-
-    // 命令 2：仅同步笔记与批注（不触碰 YAML）
-    this.addCommand({
-      id: 'zdc-sync-annotations',
-      name: t('command.syncAnnotations'),
-      callback: async () => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        const plainExportFormat: ExportFormat = {
-          name: '__sync_annotations__',
-          outputPathTemplate: '{{citekey}}.md',
-          imageOutputPathTemplate: '{{citekey}}/',
-          imageBaseNameTemplate: 'image',
-        };
-        const progressNotice = new Notice('', 0);
-        try {
-          const paths = await exportToMarkdown(
-            { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'annotations' },
-            undefined,
-            ({ macro }) => {
-              progressNotice.noticeEl.empty();
-              progressNotice.noticeEl.createSpan({ text: macro });
-            }
-          );
-          progressNotice.noticeEl.empty();
-          progressNotice.noticeEl.createSpan({
-            text: paths.length > 0
-              ? t('notice.annotationsSynced', String(paths.length))
-              : t('notice.noFilesToUpdate'),
-          });
-          setTimeout(() => progressNotice.hide(), 4000);
-        } catch (e) {
-          progressNotice.noticeEl.empty();
-          progressNotice.noticeEl.createSpan({
-            text: `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
-          });
-          setTimeout(() => progressNotice.hide(), 5000);
-        }
-      },
-    });
-
-    // 命令 3：复制引注占位符到剪贴板（不创建/修改任何笔记）
-    this.addCommand({
-      id: 'zdc-copy-citation',
-      name: t('command.copyCitation'),
-      callback: async () => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        try {
-          const citeFormat: CitationFormat = {
-            name: '__copy_citation__',
-            format: 'pandoc',
-            brackets: true,
-          };
-          const result = await getCAYW(citeFormat, database);
-          if (typeof result === 'string' && result.trim()) {
-            await navigator.clipboard.writeText(result);
-            new Notice(t('notice.citationCopied', result), 4000);
-          } else {
-            new Notice(t('notice.noCitationReturned'), 5000);
-          }
-        } catch (e) {
-          new Notice(
-            `❌ ${e instanceof Error ? e.message : 'Unknown error'}`,
-            5000
-          );
-        }
-      },
-    });
-
-    this.addCommand({
       id: 'show-zotero-debug-view',
       name: t('command.dataExplorer'),
       callback: () => {
@@ -463,51 +244,12 @@ export default class ZoteroConnector extends Plugin {
   }
 
   onunload() {
-    this.settings.citeFormats.forEach((f) => {
-      this.removeFormatCommand(f);
-    });
-
     this.settings.exportFormats.forEach((f) => {
       this.removeExportCommand(f);
     });
 
     removeBeautifyStyles();
     this.app.workspace.detachLeavesOfType(viewType);
-  }
-
-  addFormatCommand(format: CitationFormat) {
-    this.addCommand({
-      id: `${citationCommandIDPrefix}${format.name}`,
-      name: format.name,
-      editorCallback: (editor) => {
-        const database = {
-          database: this.settings.database,
-          port: this.settings.port,
-        };
-        if (format.format === 'template' && format.template.trim()) {
-          renderCiteTemplate({
-            database,
-            format,
-          }).then((res) => {
-            if (typeof res === 'string') {
-              editor.replaceSelection(res);
-            }
-          });
-        } else {
-          getCAYW(format, database).then((res) => {
-            if (typeof res === 'string') {
-              editor.replaceSelection(res);
-            }
-          });
-        }
-      },
-    });
-  }
-
-  removeFormatCommand(format: CitationFormat) {
-    (this.app as any).commands.removeCommand(
-      `${commandPrefix}${citationCommandIDPrefix}${format.name}`
-    );
   }
 
   addExportCommand(format: ExportFormat) {
@@ -554,6 +296,85 @@ export default class ZoteroConnector extends Plugin {
     });
   }
 
+  /**
+   * v6.0 文末参考文献生成器：扫描 [@citekey] 引用 → 调用 Zotero BBT 批量格式化 → 写入「## 参考文献」区域。
+   * @param silent 为 true 时不弹出 Notice（由调用方自行处理通知）
+   */
+  async generateBibliographyForEditor(editor: Editor, silent = false): Promise<void> {
+    const database = {
+      database: this.settings.database,
+      port: this.settings.port,
+    };
+
+    // 扫描文档中所有 [@citekey] 引用
+    const docText = editor.getValue();
+    const citeKeyPattern = /\[@([^\]]+)\]/g;
+    const seenKeys = new Set<string>();
+    let match;
+    while ((match = citeKeyPattern.exec(docText)) !== null) {
+      // 支持多引用 [@key1; @key2]
+      const keys = match[1].split(';').map((s) => s.trim().replace(/^@/, ''));
+      for (const k of keys) {
+        if (k) seenKeys.add(k);
+      }
+    }
+
+    if (seenKeys.size === 0) {
+      if (!silent) new Notice(t('notice.noCiteKeysFound'), 4000);
+      return;
+    }
+
+    const citeKeyObjs: CiteKeyExport[] = Array.from(seenKeys).map((key) => ({
+      key,
+      library: 1,
+      citekey: key,
+      title: '',
+    }));
+
+    const bib = await getBibFromCiteKeys(
+      citeKeyObjs as any,
+      database,
+      this.settings.cslStyle || undefined
+    );
+    if (!bib) {
+      if (!silent) new Notice(t('notice.emptyBib'), 5000);
+      return;
+    }
+
+    let markdownBib = htmlToMarkdown(bib);
+    // 将编号条目拆分为独立行（匹配「. 」后紧跟「N. 」的条目边界）
+    markdownBib = markdownBib.replace(/([.)])\s+(?=\d+\.\s)/g, '$1\n');
+
+    // 查找或创建 ## 参考文献 标题
+    const headingPattern = /^## 参考文献\s*$/m;
+    const existingMatch = headingPattern.exec(docText);
+
+    if (existingMatch) {
+      // 替换已有参考文献区域
+      const headingIndex = existingMatch.index;
+      const afterHeading = docText.indexOf('\n', headingIndex);
+      const nextHeadingIndex = docText.slice(afterHeading + 1).search(/^## /m);
+      const endIndex = nextHeadingIndex >= 0
+        ? afterHeading + 1 + nextHeadingIndex
+        : docText.length;
+
+      const before = docText.slice(0, afterHeading + 1);
+      const after = docText.slice(endIndex);
+      editor.setValue(before + '\n\n' + markdownBib + '\n' + after);
+    } else {
+      // 追加到文档末尾
+      const newContent = docText + '\n\n## 参考文献\n\n' + markdownBib + '\n';
+      editor.setValue(newContent);
+    }
+
+    if (!silent) {
+      new Notice(
+        t('notice.bibliographyGenerated', String(seenKeys.size)),
+        3000
+      );
+    }
+  }
+
   removeExportCommand(format: ExportFormat) {
     (this.app as any).commands.removeCommand(
       `${commandPrefix}${exportCommandIDPrefix}${format.name}`
@@ -585,17 +406,13 @@ export default class ZoteroConnector extends Plugin {
   }
 
   /**
-   * v5.2 静默自动同步：根据用户勾选的「执行同步内容」在后台执行更新。
-   * 仅处理 zdc-update-metadata 和 zdc-sync-annotations，
-   * 其他交互式命令（快速导入、插入参考文献等）自动忽略。
+   * v6.0 静默自动同步：根据 syncTargets 在后台执行 metadata / annotations 更新。
    * 全程无 Modal、无进度提示，成功/失败仅通过右上角 Notice 通知。
    */
   async runSilentAutoSync(citeKey: string, library: number = 1, targetFilePath?: string): Promise<void> {
     const database = { database: this.settings.database, port: this.settings.port };
-    const commands = this.settings.floatingButtonCommands || [];
+    const targets = this.settings.syncTargets || ['metadata'];
 
-    // v5.2 bugfix: 用当前文件路径作为 outputPathTemplate，确保 exportToMarkdown
-    // 能通过 getAbstractFileByPath 找到文件，而不是在 vault 根目录瞎找 {{citekey}}.md
     const outputPath = targetFilePath || `{{citekey}}.md`;
     const plainExportFormat: ExportFormat = {
       name: '__auto_sync__',
@@ -609,7 +426,7 @@ export default class ZoteroConnector extends Plugin {
     const errors: string[] = [];
 
     // 静默执行 metadata 更新
-    if (commands.includes('zdc-update-metadata')) {
+    if (targets.includes('metadata')) {
       try {
         const paths = await exportToMarkdown(
           { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'metadata' },
@@ -621,7 +438,7 @@ export default class ZoteroConnector extends Plugin {
     }
 
     // 静默执行 annotations 更新
-    if (commands.includes('zdc-sync-annotations')) {
+    if (targets.includes('annotations')) {
       try {
         const paths = await exportToMarkdown(
           { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'annotations' },
@@ -686,6 +503,20 @@ export default class ZoteroConnector extends Plugin {
       ...DEFAULT_SETTINGS,
       ...loadedSettings,
     };
+
+    // v6.0: floatingButtonCommands → syncTargets 迁移
+    if (!this.settings.syncTargets?.length && this.settings.floatingButtonCommands?.length) {
+      const targets: string[] = [];
+      const cmdToTarget: Record<string, string> = {
+        'zdc-update-metadata': 'metadata',
+        'zdc-sync-annotations': 'annotations',
+      };
+      for (const cmd of this.settings.floatingButtonCommands) {
+        const target = cmdToTarget[cmd];
+        if (target && !targets.includes(target)) targets.push(target);
+      }
+      this.settings.syncTargets = targets.length > 0 ? targets : ['metadata'];
+    }
 
     // v5.2: 迁移旧格式 propertyMappings + customProperties → propertyItems
     if (!this.settings.propertyItems?.length && (this.settings.propertyMappings?.length || this.settings.customProperties?.length)) {

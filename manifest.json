@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "5.2.0",
+	"version": "5.3.0",
 	"minAppVersion": "1.1.1",
-	"description": "v5.2.0: 统一自动化调度中心 — 开卷自动同步、更新同步Tab、执行同步内容原子化控制",
+	"description": "v5.3.0: 引注系统极简重构 — Pandoc [@citekey] 行内引注、CSL 文末参考文献自动生成、引注格式Tab瘦身",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

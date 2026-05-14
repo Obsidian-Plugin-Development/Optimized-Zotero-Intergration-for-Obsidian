@@ -17,14 +17,12 @@ import {
 import { SMART_FIELD_OPTIONS } from '../bbt/smartExtractors';
 import { getZoteroMappings, getCustomProperties } from '../bbt/helpers';
 import {
-  CitationFormat,
   ExportFormat,
   IfColorRule,
   PropertyItem,
   ZoteroConnectorSettings,
 } from '../types';
 import { AssetDownloader } from './AssetDownloader';
-import { CiteFormatSettings } from './CiteFormatSettings';
 import { ExportFormatSettings } from './ExportFormatSettings';
 import { Icon } from './Icon';
 import { SettingItem } from './SettingItem';
@@ -353,66 +351,29 @@ function NotesTab({
   );
 }
 
-// ── Tab 3：引注格式（Citation Format）React 组件 ──
+// ── Tab 3：引注格式（v6.0 极简版：仅 CSL 样式）React 组件 ──
 
 interface CitationTabProps {
   settings: ZoteroConnectorSettings;
-  addCiteFormat: (format: CitationFormat) => CitationFormat[];
-  updateCiteFormat: (index: number, format: CitationFormat) => CitationFormat[];
-  removeCiteFormat: (index: number) => CitationFormat[];
   updateSetting: (key: keyof ZoteroConnectorSettings, value: any) => void;
 }
 
 function CitationTab({
   settings,
-  addCiteFormat,
-  updateCiteFormat,
-  removeCiteFormat,
   updateSetting,
 }: CitationTabProps) {
-  const [citeFormatState, setCiteFormatState] = React.useState(settings.citeFormats);
-
-  const updateCite = React.useCallback(
-    debounce((index: number, format: CitationFormat) => {
-      setCiteFormatState(updateCiteFormat(index, format));
-    }, 200, true),
-    [updateCiteFormat]
-  );
-
-  const addCite = React.useCallback(() => {
-    setCiteFormatState(
-      addCiteFormat({ name: `Format #${citeFormatState.length + 1}`, format: 'formatted-citation' })
-    );
-  }, [addCiteFormat, citeFormatState]);
-
-  const removeCite = React.useCallback((index: number) => {
-    setCiteFormatState(removeCiteFormat(index));
-  }, [removeCiteFormat]);
-
   return (
     <div>
       <SettingItem
-        name={t('settings.citation.formats')}
-        description={t('settings.citation.formats.desc')}
-        isHeading
-      />
-
-      <SettingItem>
-        <button onClick={addCite} className="mod-cta">{t('settings.addCiteFormat')}</button>
-      </SettingItem>
-      {citeFormatState.map((f, i) => (
-        <CiteFormatSettings key={i} format={f} index={i} updateFormat={updateCite} removeFormat={removeCite} />
-      ))}
-
-      <SettingItem
-        name={t('settings.citation.suggestTemplate')}
-        description={t('settings.citation.suggestTemplate.desc')}
+        name={t('settings.sync.cslStyle')}
+        description={t('settings.sync.cslStyle.desc')}
       >
         <input
-          onChange={(e) => updateSetting('citeSuggestTemplate', (e.target as HTMLInputElement).value)}
+          onChange={(e) => updateSetting('cslStyle', (e.target as HTMLInputElement).value)}
           type="text"
           spellCheck={false}
-          defaultValue={settings.citeSuggestTemplate || '[[{{citekey}}]]'}
+          placeholder={t('settings.sync.cslStyle.placeholder')}
+          defaultValue={settings.cslStyle || ''}
         />
       </SettingItem>
     </div>
@@ -505,7 +466,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   }
 
 
-  // ── Tab 4：更新同步设置 ──
+  // ── Tab 4：同步设置 ──
 
   private _renderSyncTab(container: HTMLElement) {
     container.empty();
@@ -556,9 +517,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
     ReactDOM.render(
       <CitationTab
         settings={this.plugin.settings}
-        addCiteFormat={this.addCiteFormat}
-        updateCiteFormat={this.updateCiteFormat}
-        removeCiteFormat={this.removeCiteFormat}
         updateSetting={this.updateSetting}
       />,
       container
@@ -566,28 +524,6 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   }
 
   // ── 通用方法 ──
-
-  addCiteFormat = (format: CitationFormat) => {
-    this.plugin.addFormatCommand(format);
-    this.plugin.settings.citeFormats.unshift(format);
-    this.debouncedSave();
-    return this.plugin.settings.citeFormats.slice();
-  };
-
-  updateCiteFormat = (index: number, format: CitationFormat) => {
-    this.plugin.removeFormatCommand(this.plugin.settings.citeFormats[index]);
-    this.plugin.addFormatCommand(format);
-    this.plugin.settings.citeFormats[index] = format;
-    this.debouncedSave();
-    return this.plugin.settings.citeFormats.slice();
-  };
-
-  removeCiteFormat = (index: number) => {
-    this.plugin.removeFormatCommand(this.plugin.settings.citeFormats[index]);
-    this.plugin.settings.citeFormats.splice(index, 1);
-    this.debouncedSave();
-    return this.plugin.settings.citeFormats.slice();
-  };
 
   addExportFormat = (format: ExportFormat) => {
     this.plugin.addExportCommand(format);
@@ -670,59 +606,39 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
           });
       });
 
-    // ── v5.1: 悬浮球命令多选 ──
-    const commandSection = wrapper.createDiv('zotero-command-toggles');
-    commandSection.style.marginTop = '12px';
-
+    // ── v6.0: 同步目标 ──
     new Setting(wrapper)
-      .setName(t('settings.metadata.floatingButtonCommands'))
-      .setDesc(t('settings.metadata.floatingButtonCommands.desc'))
+      .setName(t('settings.sync.targets'))
+      .setDesc(t('settings.sync.targets.desc'))
       .setHeading();
 
-    const commands = this.plugin.settings.floatingButtonCommands || ['zdc-update-metadata'];
+    const syncTargets = this.plugin.settings.syncTargets || ['metadata'];
 
-    const commandOptions: { id: string; labelKey: string }[] = [
-      { id: 'zdc-update-metadata', labelKey: 'command.updateMetadata' },
-      { id: 'zdc-sync-annotations', labelKey: 'command.syncAnnotations' },
-      { id: 'zdc-quick-import', labelKey: 'command.quickImport' },
-      { id: 'zdc-insert-bibliography', labelKey: 'command.insertBibliography' },
-      { id: 'zdc-copy-citation', labelKey: 'command.copyCitation' },
-      { id: 'zdc-insert-annotations', labelKey: 'command.insertAnnotations' },
+    const syncTargetOptions: { id: string; labelKey: string }[] = [
+      { id: 'metadata', labelKey: 'settings.sync.targets.metadata' },
+      { id: 'annotations', labelKey: 'settings.sync.targets.annotations' },
     ];
 
-    const noCommandsHint = wrapper.createDiv('zotero-no-commands-hint');
-    noCommandsHint.style.cssText = 'color: var(--text-warning); font-size: 0.85em; margin: 8px 0; display: none;';
-
-    const refreshToggles = () => {
-      const selected = this.plugin.settings.floatingButtonCommands || [];
-      noCommandsHint.style.display = selected.length === 0 ? 'block' : 'none';
-    };
-
-    for (const opt of commandOptions) {
+    for (const opt of syncTargetOptions) {
       new Setting(wrapper)
         .setName(t(opt.labelKey))
         .addToggle((toggle) => {
           toggle
-            .setValue(commands.includes(opt.id))
+            .setValue(syncTargets.includes(opt.id))
             .onChange((value) => {
-              const current = this.plugin.settings.floatingButtonCommands || ['zdc-update-metadata'];
+              const current = this.plugin.settings.syncTargets || ['metadata'];
               if (value) {
-                if (!current.includes(opt.id)) {
-                  current.push(opt.id);
-                }
+                if (!current.includes(opt.id)) current.push(opt.id);
               } else {
                 const idx = current.indexOf(opt.id);
                 if (idx >= 0) current.splice(idx, 1);
               }
-              this.plugin.settings.floatingButtonCommands = current;
+              this.plugin.settings.syncTargets = current;
               this.debouncedSave();
-              refreshToggles();
             });
         });
     }
 
-    noCommandsHint.createSpan({ text: t('settings.metadata.floatingButtonCommands.noCommands') });
-    refreshToggles();
   }
 
   // ── IF Color Rules（保留原生 Setting API）──

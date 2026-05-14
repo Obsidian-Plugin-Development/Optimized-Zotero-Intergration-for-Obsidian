@@ -1175,10 +1175,8 @@ function getAStyle(settings: ZoteroConnectorSettings) {
     return exportStyle.cslStyle;
   }
 
-  const citeStyle = settings.citeFormats.find((f) => !!f.cslStyle);
-
-  if (citeStyle) {
-    return citeStyle.cslStyle;
+  if (settings.cslStyle) {
+    return settings.cslStyle;
   }
 }
 

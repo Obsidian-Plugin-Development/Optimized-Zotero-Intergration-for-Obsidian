@@ -182,13 +182,9 @@ const en: StringMap = {
   'command.insertNotes': 'Insert notes into current document',
   'command.importNotes': 'Import notes',
   'command.dataExplorer': 'Data explorer',
-  'command.quickImport': 'Quick Import (Visual Mappings)',
-  'command.updateMetadata': 'Update Metadata (YAML only)',
-  'command.syncAnnotations': 'Sync Annotations (Body only)',
-  'command.copyCitation': 'Copy Citation to Clipboard',
-  'command.insertItemInfo': 'Insert Item Info (YAML)',
-  'command.insertAnnotations': 'Insert Notes & Annotations',
-  'command.insertBibliography': 'Insert Bibliography',
+  'command.smartSync': 'Smart Sync',
+  'command.insertInlineCitation': 'Insert Inline Citation',
+  'command.generateBibliography': 'Generate Bibliography',
 
   // ── 模态框 / 提示 ──
   'modal.fetchingData': 'Fetching data from Zotero...',
@@ -270,7 +266,7 @@ const en: StringMap = {
   'settings.tab.metadata': 'Metadata Mapping',
   'settings.tab.notes': 'Notes Template',
   'settings.tab.citation': 'Citation Format',
-  'settings.tab.sync': 'Update & Sync',
+  'settings.tab.sync': 'Sync',
 
   // ── System Header ──
   'settings.system': 'System Settings',
@@ -313,6 +309,26 @@ const en: StringMap = {
     'When enabled, opening a note that matches the trigger key above will silently run the selected sync targets below in the background.',
   'notice.autoSyncCompleted': '✅ Literature content auto-synced',
   'notice.autoSyncFailed': '⚠️ Auto-sync failed',
+
+  // ── v6.0 Sync & Cite ──
+  'settings.sync.targets': 'Sync Targets',
+  'settings.sync.targets.desc':
+    'Select what to sync automatically and via floating button.',
+  'settings.sync.targets.metadata': 'Metadata (YAML)',
+  'settings.sync.targets.annotations': 'Annotations (Body)',
+  'settings.sync.cslStyle': 'CSL Citation Style',
+  'settings.sync.cslStyle.desc':
+    'Style identifier for inline citations and bibliography (e.g. chicago-author-date, gb-t-7714-2015). Must be installed in Zotero.',
+  'settings.sync.cslStyle.placeholder': 'e.g. chicago-author-date',
+  'settings.sync.citationMode': 'Citation Mode',
+  'settings.sync.citationMode.desc':
+    'Mode A: Paste [@citekey] placeholder for Pandoc. Mode B: Paste CSL-rendered citation text.',
+  'settings.sync.citationMode.placeholder': 'Mode A: [@citekey] Placeholder',
+  'settings.sync.citationMode.rendered': 'Mode B: CSL Rendered Citation',
+  'notice.inlineCitationInserted': 'Inline citation inserted.',
+  'notice.bibliographyGenerated': 'Bibliography generated with %s entries.',
+  'notice.bibliographyUpdated': 'Bibliography updated with %s entries.',
+  'notice.noCiteKeysFound': 'No [@citekey] references found in document.',
 
 
   // ── Notes Tab ──
@@ -491,13 +507,9 @@ const zhCN: StringMap = {
   'command.insertNotes': '将笔记插入当前文档',
   'command.importNotes': '导入为独立笔记',
   'command.dataExplorer': '数据浏览器',
-  'command.quickImport': '快速导入',
-  'command.updateMetadata': '更新条目信息',
-  'command.syncAnnotations': '更新批注笔记',
-  'command.copyCitation': '复制引注占位符到剪贴板',
-  'command.insertItemInfo': '插入条目信息（YAML）',
-  'command.insertAnnotations': '插入批注笔记',
-  'command.insertBibliography': '插入参考文献',
+  'command.smartSync': '智能同步',
+  'command.insertInlineCitation': '插入行内引注',
+  'command.generateBibliography': '生成参考文献列表',
 
   // ── 模态框 / 提示 ──
   'modal.fetchingData': '正在从 Zotero 获取数据...',
@@ -576,7 +588,7 @@ const zhCN: StringMap = {
   'settings.tab.metadata': '元数据映射',
   'settings.tab.notes': '笔记模板',
   'settings.tab.citation': '引注格式',
-  'settings.tab.sync': '更新同步',
+  'settings.tab.sync': '同步',
 
   // ── System Header ──
   'settings.system': '系统设置',
@@ -619,6 +631,26 @@ const zhCN: StringMap = {
     '开启后，每次打开符合上述特征键的笔记时，将在后台静默自动执行下方勾选的同步内容。',
   'notice.autoSyncCompleted': '✅ 文献内容已自动同步',
   'notice.autoSyncFailed': '⚠️ 自动同步失败',
+
+  // ── v6.0 同步与引注 ──
+  'settings.sync.targets': '同步目标',
+  'settings.sync.targets.desc':
+    '选择自动同步和悬浮球触发时要更新的内容。',
+  'settings.sync.targets.metadata': '元数据 (YAML)',
+  'settings.sync.targets.annotations': '批注 (正文)',
+  'settings.sync.cslStyle': 'CSL 引注样式',
+  'settings.sync.cslStyle.desc':
+    '行内引注和参考文献的 CSL 样式标识符（如 chicago-author-date、gb-t-7714-2015）。样式需在 Zotero 中安装。',
+  'settings.sync.cslStyle.placeholder': '例如：gb-t-7714-2015',
+  'settings.sync.citationMode': '引注模式',
+  'settings.sync.citationMode.desc':
+    '模式 A：粘贴 [@citekey] 占位符（配合 Pandoc 导出）。模式 B：粘贴 CSL 渲染后的格式化引注文本。',
+  'settings.sync.citationMode.placeholder': '模式 A：[@citekey] 占位符',
+  'settings.sync.citationMode.rendered': '模式 B：CSL 格式化引注',
+  'notice.inlineCitationInserted': '行内引注已插入。',
+  'notice.bibliographyGenerated': '参考文献列表已生成，共 %s 条。',
+  'notice.bibliographyUpdated': '参考文献列表已更新，共 %s 条。',
+  'notice.noCiteKeysFound': '文档中未找到 [@citekey] 引用。',
 
 
   // ── Notes Tab ──

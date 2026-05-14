@@ -117,8 +117,6 @@ export interface SmartFieldOption {
 }
 
 export interface ZoteroConnectorSettings {
-  citeFormats: CitationFormat[];
-  citeSuggestTemplate?: string;
   database: Database;
   port?: string;
   exeVersion?: string;
@@ -139,8 +137,13 @@ export interface ZoteroConnectorSettings {
   triggerFeatureKey?: string;
   /** v5.1: 悬浮球触发特征值。设置了值则需要 key+value 同时匹配 */
   triggerFeatureValue?: string;
-  /** v5.0: 悬浮球点击后可触发的命令 ID 列表（多选），弹出菜单供用户选择 */
+  /** v5.0: 悬浮球点击后可触发的命令 ID 列表（多选），弹出菜单供用户选择
+   * @deprecated v6.0 迁移到 syncTargets */
   floatingButtonCommands?: string[];
+  /** v6.0: 同步目标。可选值: 'metadata' | 'annotations' */
+  syncTargets?: string[];
+  /** v6.0: CSL 样式标识符，用于文末参考文献的格式化渲染 */
+  cslStyle?: string;
   /** v5.2: 开卷自动同步 — 打开匹配触发条件的笔记时静默执行同步 */
   autoSyncOnOpen?: boolean;
   bodyTemplate?: string;

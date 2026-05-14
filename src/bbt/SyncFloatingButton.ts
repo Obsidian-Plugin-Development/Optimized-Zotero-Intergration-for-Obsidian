@@ -1,7 +1,5 @@
 import { MarkdownView, Notice, TFile } from 'obsidian';
 import type ZoteroConnector from '../main';
-import type { ExportFormat } from '../types';
-import { exportToMarkdown } from './export';
 import { t } from '../locale/i18n';
 
 /**
@@ -153,15 +151,14 @@ export class SyncFloatingButton {
     const now = Date.now();
     const lastSync = SyncFloatingButton.autoSyncDebounceMap.get(file.path);
 
-    // 防抖：3 分钟内同文件不重复触发，除非「执行同步内容」勾选发生了变化
+    // 防抖：3 分钟内同文件不重复触发，除非「同步目标」勾选发生了变化
     if (lastSync && (now - lastSync.time) < SyncFloatingButton.AUTO_SYNC_DEBOUNCE_MS) {
-      const currentCmds = this.plugin.settings.floatingButtonCommands || [];
+      const currentCmds = this.plugin.settings.syncTargets || ['metadata'];
       const lastCmds = lastSync.commands || [];
-      // 用排序后字符串比较判断命令集是否一致
       if (currentCmds.slice().sort().join(',') === lastCmds.slice().sort().join(',')) {
         return;
       }
-      // 命令集变了，允许重新同步
+      // 同步目标变了，允许重新同步
     }
 
     // 飞行中保护：同一文件已有同步在执行中
@@ -172,9 +169,9 @@ export class SyncFloatingButton {
     const citeKey = this.extractCiteKeyFromFile(file);
     if (!citeKey) return;
 
-    // 仅静默处理 metadata / annotations，其他交互式命令忽略
-    const commands = this.plugin.settings.floatingButtonCommands || [];
-    if (!commands.includes('zdc-update-metadata') && !commands.includes('zdc-sync-annotations')) {
+    // 仅静默处理 metadata / annotations，其他目标不参与自动同步
+    const targets = this.plugin.settings.syncTargets || ['metadata'];
+    if (!targets.includes('metadata') && !targets.includes('annotations')) {
       return;
     }
 
@@ -184,7 +181,7 @@ export class SyncFloatingButton {
       // 仅在成功完成后设置防抖时间戳与命令快照，失败不阻塞重试
       SyncFloatingButton.autoSyncDebounceMap.set(file.path, {
         time: Date.now(),
-        commands: [...commands],
+        commands: [...targets],
       });
       new Notice(t('notice.autoSyncCompleted'), 3000);
     } catch (e) {
@@ -434,13 +431,22 @@ export class SyncFloatingButton {
       return;
     }
 
-    const commands = this.plugin.settings.floatingButtonCommands || ['zdc-update-metadata'];
-    if (commands.length === 0) return;
+    // v6.0: 基于 syncTargets 构建菜单
+    const targets = this.plugin.settings.syncTargets || ['metadata'];
+    const menuCommands: string[] = [];
 
-    if (commands.length === 1) {
-      this.executeCommand(commands[0]);
+    if (targets.includes('metadata') || targets.includes('annotations')) {
+      menuCommands.push('zdc-smart-sync');
+    }
+    menuCommands.push('zdc-insert-inline-citation');
+    menuCommands.push('zdc-generate-bibliography');
+
+    if (menuCommands.length === 0) return;
+
+    if (menuCommands.length === 1) {
+      this.executeCommand(menuCommands[0]);
     } else {
-      this.showCommandMenu(commands);
+      this.showCommandMenu(menuCommands);
     }
   }
 
@@ -448,12 +454,9 @@ export class SyncFloatingButton {
 
   private getCommandLabel(cmdId: string): string {
     const keyMap: Record<string, string> = {
-      'zdc-update-metadata': 'command.updateMetadata',
-      'zdc-sync-annotations': 'command.syncAnnotations',
-      'zdc-quick-import': 'command.quickImport',
-      'zdc-insert-bibliography': 'command.insertBibliography',
-      'zdc-copy-citation': 'command.copyCitation',
-      'zdc-insert-annotations': 'command.insertAnnotations',
+      'zdc-smart-sync': 'command.smartSync',
+      'zdc-insert-inline-citation': 'command.insertInlineCitation',
+      'zdc-generate-bibliography': 'command.generateBibliography',
     };
     return t(keyMap[cmdId] || cmdId);
   }
@@ -584,18 +587,13 @@ export class SyncFloatingButton {
     const file = this.plugin.app.workspace.getActiveFile();
     if (!file) return;
 
-    // v5.2 bugfix: 对 sync 类命令，直接调用 runSilentAutoSync 并传入当前文件路径，
-    // 避免 executeCommandById 走 exportToMarkdown 时用硬编码 {{citekey}}.md 找不到子文件夹中的文件
-    if (cmdId === 'zdc-update-metadata') {
-      await this.runSyncForCurrentFile(file, 'metadata');
-      return;
-    }
-    if (cmdId === 'zdc-sync-annotations') {
-      await this.runSyncForCurrentFile(file, 'annotations');
+    // v6.0: 智能同步 — 根据 syncTargets 执行 metadata/annotations 更新
+    if (cmdId === 'zdc-smart-sync') {
+      await this.runSmartSync(file);
       return;
     }
 
-    // 其他命令（快速导入、插入参考文献等）走命令系统
+    // 其他命令（插入行内引注、生成参考文献列表）走命令系统
     try {
       (this.plugin.app as any).commands.executeCommandById(
         `optimized-zotero-integration:${cmdId}`
@@ -605,27 +603,16 @@ export class SyncFloatingButton {
     }
   }
 
-  /** 对当前文件执行单个同步模式（metadata 或 annotations） */
-  private async runSyncForCurrentFile(file: TFile, mode: 'metadata' | 'annotations') {
+  /** v6.0: 根据 syncTargets 对当前文件执行智能同步 */
+  private async runSmartSync(file: TFile) {
     const citeKey = this.extractCiteKeyFromFile(file);
     if (!citeKey) return;
 
-    const database = { database: this.plugin.settings.database, port: this.plugin.settings.port };
-    const plainExportFormat: ExportFormat = {
-      name: '__manual_sync__',
-      outputPathTemplate: file.path,
-      imageOutputPathTemplate: '{{citekey}}/',
-      imageBaseNameTemplate: 'image',
-    };
-
     try {
-      await exportToMarkdown(
-        { settings: this.plugin.settings, database, exportFormat: plainExportFormat, syncMode: mode },
-        [{ key: citeKey.startsWith('@') ? citeKey.substring(1) : citeKey, library: 1 }]
-      );
+      await this.plugin.runSilentAutoSync(citeKey, 1, file.path);
       new Notice(t('notice.autoSyncCompleted'), 3000);
     } catch (e) {
-      console.error('[ManualSync]', e);
+      console.error('[SmartSync]', e);
       new Notice(t('notice.autoSyncFailed'), 3000);
     }
   }
