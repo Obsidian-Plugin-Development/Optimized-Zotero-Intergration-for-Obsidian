@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "5.1.0",
+	"version": "5.2.0",
 	"minAppVersion": "1.1.1",
-	"description": "v5.1.0: 动态双轨语义评价系统 — 圆点(目标系)与星星(评估系)双符号体系，5字符定宽对齐",
+	"description": "v5.2.0: 统一自动化调度中心 — 开卷自动同步、更新同步Tab、执行同步内容原子化控制",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

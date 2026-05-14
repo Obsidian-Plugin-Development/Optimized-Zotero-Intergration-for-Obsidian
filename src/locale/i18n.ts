@@ -270,7 +270,7 @@ const en: StringMap = {
   'settings.tab.metadata': 'Metadata Mapping',
   'settings.tab.notes': 'Notes Template',
   'settings.tab.citation': 'Citation Format',
-  'settings.tab.sync': 'Sync Float',
+  'settings.tab.sync': 'Update & Sync',
 
   // ── System Header ──
   'settings.system': 'System Settings',
@@ -301,11 +301,18 @@ const en: StringMap = {
     'The floating sync button only appears when the current note YAML contains this key (default: Title).',
   'settings.metadata.triggerFeatureValue.desc':
     'Optional: If set, the YAML value for the above key must also match this value. Leave empty to match any value.',
-  'settings.metadata.floatingButtonCommands': 'Floating Button Commands',
+  'settings.metadata.floatingButtonCommands': 'Sync Targets',
   'settings.metadata.floatingButtonCommands.desc':
-    'Select which commands appear in the popup menu when you click the floating button.',
+    'Select which content to update when clicking the floating button or triggering auto-sync.',
   'settings.metadata.floatingButtonCommands.noCommands':
     'No commands selected. The floating button will not respond to clicks.',
+
+  // ── v5.2 Auto-Sync ──
+  'settings.sync.autoSyncOnOpen': 'Auto-Sync on Open',
+  'settings.sync.autoSyncOnOpen.desc':
+    'When enabled, opening a note that matches the trigger key above will silently run the selected sync targets below in the background.',
+  'notice.autoSyncCompleted': '✅ Literature content auto-synced',
+  'notice.autoSyncFailed': '⚠️ Auto-sync failed',
 
 
   // ── Notes Tab ──
@@ -569,7 +576,7 @@ const zhCN: StringMap = {
   'settings.tab.metadata': '元数据映射',
   'settings.tab.notes': '笔记模板',
   'settings.tab.citation': '引注格式',
-  'settings.tab.sync': '同步悬浮',
+  'settings.tab.sync': '更新同步',
 
   // ── System Header ──
   'settings.system': '系统设置',
@@ -600,11 +607,18 @@ const zhCN: StringMap = {
   'settings.metadata.triggerFeatureValue': '悬浮球触发特征值',
   'settings.metadata.triggerFeatureValue.desc':
     '可选：设置后，YAML 中对应键的值必须与此值匹配才触发悬浮球。留空则匹配任意值。',
-  'settings.metadata.floatingButtonCommands': '悬浮球触发命令',
+  'settings.metadata.floatingButtonCommands': '执行同步内容',
   'settings.metadata.floatingButtonCommands.desc':
-    '选择点击悬浮球后弹出菜单中显示的命令。',
+    '请选择在点击悬浮球或触发自动同步时，需要更新哪些具体内容。',
   'settings.metadata.floatingButtonCommands.noCommands':
     '未选择任何命令，点击悬浮球将无反应。',
+
+  // ── v5.2 开卷自动同步 ──
+  'settings.sync.autoSyncOnOpen': '开卷自动同步',
+  'settings.sync.autoSyncOnOpen.desc':
+    '开启后，每次打开符合上述特征键的笔记时，将在后台静默自动执行下方勾选的同步内容。',
+  'notice.autoSyncCompleted': '✅ 文献内容已自动同步',
+  'notice.autoSyncFailed': '⚠️ 自动同步失败',
 
 
   // ── Notes Tab ──

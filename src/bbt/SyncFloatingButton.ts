@@ -1,5 +1,7 @@
-import { MarkdownView, TFile } from 'obsidian';
+import { MarkdownView, Notice, TFile } from 'obsidian';
 import type ZoteroConnector from '../main';
+import type { ExportFormat } from '../types';
+import { exportToMarkdown } from './export';
 import { t } from '../locale/i18n';
 
 /**
@@ -51,6 +53,13 @@ export class SyncFloatingButton {
   // 吸附边距
   private readonly SNAP_MARGIN = 8;
 
+  // v5.2 自动同步防抖 (static 跨实例共享)
+  // 同时记录已执行同步的命令快照，用户修改「执行同步内容」勾选后重开文件可立即生效
+  private static autoSyncDebounceMap = new Map<string, { time: number; commands: string[] }>();
+  private static readonly AUTO_SYNC_DEBOUNCE_MS = 3 * 60 * 1000; // 3 分钟
+  // 飞行中 tracker：防止同一文件并发执行两次同步
+  private static inFlightSet = new Set<string>();
+
   constructor(plugin: ZoteroConnector) {
     this.plugin = plugin;
     this.registerListeners();
@@ -94,6 +103,10 @@ export class SyncFloatingButton {
       this.plugin.app.workspace.on('file-open', (file) => {
         if (file && this.isLiteratureNote(file)) {
           this.mount();
+          // v5.2: 开卷自动同步
+          if (this.plugin.settings.autoSyncOnOpen) {
+            this.tryAutoSync(file);
+          }
         } else {
           this.destroy();
         }
@@ -130,6 +143,56 @@ export class SyncFloatingButton {
       return String(actualValue ?? '') === triggerValue;
     }
     return true;
+  }
+
+  /**
+   * v5.2 开卷自动同步引擎。
+   * 满足条件（防抖通过 + citeKey 存在 + 命令勾选）后静默执行同步。
+   */
+  private async tryAutoSync(file: TFile) {
+    const now = Date.now();
+    const lastSync = SyncFloatingButton.autoSyncDebounceMap.get(file.path);
+
+    // 防抖：3 分钟内同文件不重复触发，除非「执行同步内容」勾选发生了变化
+    if (lastSync && (now - lastSync.time) < SyncFloatingButton.AUTO_SYNC_DEBOUNCE_MS) {
+      const currentCmds = this.plugin.settings.floatingButtonCommands || [];
+      const lastCmds = lastSync.commands || [];
+      // 用排序后字符串比较判断命令集是否一致
+      if (currentCmds.slice().sort().join(',') === lastCmds.slice().sort().join(',')) {
+        return;
+      }
+      // 命令集变了，允许重新同步
+    }
+
+    // 飞行中保护：同一文件已有同步在执行中
+    if (SyncFloatingButton.inFlightSet.has(file.path)) {
+      return;
+    }
+
+    const citeKey = this.extractCiteKeyFromFile(file);
+    if (!citeKey) return;
+
+    // 仅静默处理 metadata / annotations，其他交互式命令忽略
+    const commands = this.plugin.settings.floatingButtonCommands || [];
+    if (!commands.includes('zdc-update-metadata') && !commands.includes('zdc-sync-annotations')) {
+      return;
+    }
+
+    SyncFloatingButton.inFlightSet.add(file.path);
+    try {
+      await this.plugin.runSilentAutoSync(citeKey, 1, file.path);
+      // 仅在成功完成后设置防抖时间戳与命令快照，失败不阻塞重试
+      SyncFloatingButton.autoSyncDebounceMap.set(file.path, {
+        time: Date.now(),
+        commands: [...commands],
+      });
+      new Notice(t('notice.autoSyncCompleted'), 3000);
+    } catch (e) {
+      console.error('[AutoSync]', e);
+      new Notice(t('notice.autoSyncFailed'), 3000);
+    } finally {
+      SyncFloatingButton.inFlightSet.delete(file.path);
+    }
   }
 
   // ── DOM 挂载 / 销毁 ──
@@ -521,25 +584,49 @@ export class SyncFloatingButton {
     const file = this.plugin.app.workspace.getActiveFile();
     if (!file) return;
 
+    // v5.2 bugfix: 对 sync 类命令，直接调用 runSilentAutoSync 并传入当前文件路径，
+    // 避免 executeCommandById 走 exportToMarkdown 时用硬编码 {{citekey}}.md 找不到子文件夹中的文件
+    if (cmdId === 'zdc-update-metadata') {
+      await this.runSyncForCurrentFile(file, 'metadata');
+      return;
+    }
+    if (cmdId === 'zdc-sync-annotations') {
+      await this.runSyncForCurrentFile(file, 'annotations');
+      return;
+    }
+
+    // 其他命令（快速导入、插入参考文献等）走命令系统
     try {
       (this.plugin.app as any).commands.executeCommandById(
         `optimized-zotero-integration:${cmdId}`
       );
     } catch {
-      if (cmdId === 'zdc-update-metadata') {
-        const database = {
-          database: this.plugin.settings.database,
-          port: this.plugin.settings.port,
-        };
-        const citeKey = this.extractCiteKeyFromFile(file);
-        if (citeKey) {
-          try {
-            await this.plugin.runImport('__update_metadata__', citeKey);
-          } catch {
-            // fallback silent
-          }
-        }
-      }
+      // 命令未注册或执行失败
+    }
+  }
+
+  /** 对当前文件执行单个同步模式（metadata 或 annotations） */
+  private async runSyncForCurrentFile(file: TFile, mode: 'metadata' | 'annotations') {
+    const citeKey = this.extractCiteKeyFromFile(file);
+    if (!citeKey) return;
+
+    const database = { database: this.plugin.settings.database, port: this.plugin.settings.port };
+    const plainExportFormat: ExportFormat = {
+      name: '__manual_sync__',
+      outputPathTemplate: file.path,
+      imageOutputPathTemplate: '{{citekey}}/',
+      imageBaseNameTemplate: 'image',
+    };
+
+    try {
+      await exportToMarkdown(
+        { settings: this.plugin.settings, database, exportFormat: plainExportFormat, syncMode: mode },
+        [{ key: citeKey.startsWith('@') ? citeKey.substring(1) : citeKey, library: 1 }]
+      );
+      new Notice(t('notice.autoSyncCompleted'), 3000);
+    } catch (e) {
+      console.error('[ManualSync]', e);
+      new Notice(t('notice.autoSyncFailed'), 3000);
     }
   }
 

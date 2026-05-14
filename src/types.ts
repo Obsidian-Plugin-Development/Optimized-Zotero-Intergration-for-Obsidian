@@ -141,6 +141,8 @@ export interface ZoteroConnectorSettings {
   triggerFeatureValue?: string;
   /** v5.0: 悬浮球点击后可触发的命令 ID 列表（多选），弹出菜单供用户选择 */
   floatingButtonCommands?: string[];
+  /** v5.2: 开卷自动同步 — 打开匹配触发条件的笔记时静默执行同步 */
+  autoSyncOnOpen?: boolean;
   bodyTemplate?: string;
   /** v3.0: 智能多级文件夹路由的根存储目录 */
   baseStorageFolder?: string;

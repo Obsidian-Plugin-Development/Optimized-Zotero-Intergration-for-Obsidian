@@ -505,7 +505,7 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
   }
 
 
-  // ── Tab 4：同步悬浮球设置 ──
+  // ── Tab 4：更新同步设置 ──
 
   private _renderSyncTab(container: HTMLElement) {
     container.empty();
@@ -653,6 +653,19 @@ export class ZoteroConnectorSettingsTab extends PluginSettingTab {
           .setPlaceholder('文献笔记')
           .onChange((value) => {
             this.plugin.settings.triggerFeatureValue = value;
+            this.debouncedSave();
+          });
+      });
+
+    // ── v5.2: 开卷自动同步开关 ──
+    new Setting(wrapper)
+      .setName(t('settings.sync.autoSyncOnOpen'))
+      .setDesc(t('settings.sync.autoSyncOnOpen.desc'))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.autoSyncOnOpen || false)
+          .onChange((value) => {
+            this.plugin.settings.autoSyncOnOpen = value;
             this.debouncedSave();
           });
       });

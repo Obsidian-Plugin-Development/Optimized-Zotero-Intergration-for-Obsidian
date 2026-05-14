@@ -59,6 +59,7 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   triggerFeatureKey: '文献标题',
   triggerFeatureValue: '',
   floatingButtonCommands: ['zdc-update-metadata'],
+  autoSyncOnOpen: false,
   bodyTemplate: '## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}',
   openNoteAfterImport: false,
   whichNotesToOpenAfterImport: 'first-imported-note',
@@ -581,6 +582,59 @@ export default class ZoteroConnector extends Plugin {
       },
       [{ key: citekey, library }]
     );
+  }
+
+  /**
+   * v5.2 静默自动同步：根据用户勾选的「执行同步内容」在后台执行更新。
+   * 仅处理 zdc-update-metadata 和 zdc-sync-annotations，
+   * 其他交互式命令（快速导入、插入参考文献等）自动忽略。
+   * 全程无 Modal、无进度提示，成功/失败仅通过右上角 Notice 通知。
+   */
+  async runSilentAutoSync(citeKey: string, library: number = 1, targetFilePath?: string): Promise<void> {
+    const database = { database: this.settings.database, port: this.settings.port };
+    const commands = this.settings.floatingButtonCommands || [];
+
+    // v5.2 bugfix: 用当前文件路径作为 outputPathTemplate，确保 exportToMarkdown
+    // 能通过 getAbstractFileByPath 找到文件，而不是在 vault 根目录瞎找 {{citekey}}.md
+    const outputPath = targetFilePath || `{{citekey}}.md`;
+    const plainExportFormat: ExportFormat = {
+      name: '__auto_sync__',
+      outputPathTemplate: outputPath,
+      imageOutputPathTemplate: '{{citekey}}/',
+      imageBaseNameTemplate: 'image',
+    };
+
+    if (citeKey.startsWith('@')) citeKey = citeKey.substring(1);
+
+    const errors: string[] = [];
+
+    // 静默执行 metadata 更新
+    if (commands.includes('zdc-update-metadata')) {
+      try {
+        const paths = await exportToMarkdown(
+          { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'metadata' },
+          [{ key: citeKey, library }]
+        );
+      } catch (e) {
+        errors.push(`元数据: ${e instanceof Error ? e.message : 'Unknown'}`);
+      }
+    }
+
+    // 静默执行 annotations 更新
+    if (commands.includes('zdc-sync-annotations')) {
+      try {
+        const paths = await exportToMarkdown(
+          { settings: this.settings, database, exportFormat: plainExportFormat, syncMode: 'annotations' },
+          [{ key: citeKey, library }]
+        );
+      } catch (e) {
+        errors.push(`批注: ${e instanceof Error ? e.message : 'Unknown'}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(errors.join('; '));
+    }
   }
 
   async openNotes(createdOrUpdatedMarkdownFilesPaths: string[]) {
