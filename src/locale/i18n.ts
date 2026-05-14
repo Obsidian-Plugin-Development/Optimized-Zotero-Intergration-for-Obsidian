@@ -454,14 +454,14 @@ const zhCN: StringMap = {
 
   // ── 命令名称 ──
   'command.insertNotes': '将笔记插入当前文档',
-  'command.importNotes': '导入笔记',
+  'command.importNotes': '导入为独立笔记',
   'command.dataExplorer': '数据浏览器',
-  'command.quickImport': '快速导入（可视化映射）',
-  'command.updateMetadata': '更新文献元数据（仅YAML）',
-  'command.syncAnnotations': '同步笔记与批注（仅正文）',
+  'command.quickImport': '快速导入',
+  'command.updateMetadata': '更新条目信息',
+  'command.syncAnnotations': '更新批注笔记',
   'command.copyCitation': '复制引注占位符到剪贴板',
   'command.insertItemInfo': '插入条目信息（YAML）',
-  'command.insertAnnotations': '插入笔记与批注',
+  'command.insertAnnotations': '插入批注笔记',
   'command.insertBibliography': '插入参考文献',
 
   // ── 模态框 / 提示 ──
