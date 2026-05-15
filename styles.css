@@ -354,12 +354,15 @@
 
 /* 行内引注编号 */
 .custom-citation-inline {
-    color: var(--link-color);
-    font-weight: 500;
+    color: var(--text-accent);
+    font-weight: 600;
     cursor: pointer;
     user-select: none;
     transition: color 0.15s ease;
     padding: 0 1px;
+    /* v7.0: CSS 上标（无 <sup> 标签，无 HTML 注入） */
+    vertical-align: super;
+    font-size: 0.75em;
 }
 
 .custom-citation-inline:hover {

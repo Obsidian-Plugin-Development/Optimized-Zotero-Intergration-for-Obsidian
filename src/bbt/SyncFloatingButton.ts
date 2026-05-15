@@ -2,6 +2,7 @@ import { MarkdownView, Notice, setIcon, TFile } from 'obsidian';
 import type ZoteroConnector from '../main';
 import { t } from '../locale/i18n';
 import type { TriggerCondition } from '../types';
+import { isBibOutOfSync, onBibDirtyChange } from '../citation/bibliographyWriter';
 
 /**
  * v5.0.1 磁吸悬浮同步球（Draggable Floating Action Button）
@@ -123,6 +124,14 @@ export class SyncFloatingButton {
       })
     );
 
+    // v7.1: 参考文献 dirty/clean 状态 → 图标切换
+    this.plugin.registerEvent(
+      this.plugin.emitter.on('bibDirty', () => this.updateBibStatusIcon())
+    );
+    this.plugin.registerEvent(
+      this.plugin.emitter.on('bibClean', () => this.updateBibStatusIcon())
+    );
+
     // 窗口大小改变时修正垂直位置
     this.plugin.registerEvent(
       this.plugin.app.workspace.on('resize', () => {
@@ -234,7 +243,7 @@ export class SyncFloatingButton {
 
     const btn = container.createDiv('sync-floating-button');
     // Obsidian 原生 Lucide 图标，自动适配亮暗主题
-    setIcon(btn, 'book-open');
+    setIcon(btn, 'file-text');
 
     // 基础样式
     btn.style.cssText = this.buildBaseStyle();
@@ -251,8 +260,22 @@ export class SyncFloatingButton {
     this.button = btn;
     this.bindDrag();
 
+    // v7.1: 挂载时根据当前 dirty 状态设置图标
+    this.updateBibStatusIcon();
+
     // 恢复后做一次垂直边界修正
     requestAnimationFrame(() => this.clampVerticalPosition());
+  }
+
+  /** v7.1: 根据 isBibOutOfSync 切换图标 — 脏 file-pen / 干净 file-text */
+  private updateBibStatusIcon() {
+    const btn = this.button;
+    if (!btn) return;
+    if (isBibOutOfSync) {
+      setIcon(btn, 'file-pen');
+    } else {
+      setIcon(btn, 'file-text');
+    }
   }
 
   private destroy() {
@@ -453,7 +476,10 @@ export class SyncFloatingButton {
     if (targets.includes('metadata') || targets.includes('annotations')) {
       menuCommands.push('zdc-smart-sync');
     }
+    menuCommands.push('zdc-import-literature');
     menuCommands.push('zdc-insert-inline-citation');
+    // v7.1: 始终显示更新参考文献选项
+    menuCommands.push('update-bibliography');
 
     if (menuCommands.length === 0) return;
 
@@ -469,7 +495,9 @@ export class SyncFloatingButton {
   private getCommandLabel(cmdId: string): string {
     const keyMap: Record<string, string> = {
       'zdc-smart-sync': 'command.smartSync',
+      'zdc-import-literature': 'command.importLiterature',
       'zdc-insert-inline-citation': 'command.insertInlineCitation',
+      'update-bibliography': 'command.updateBibliography',
     };
     return t(keyMap[cmdId] || cmdId);
   }
@@ -597,16 +625,16 @@ export class SyncFloatingButton {
   // ── 命令执行 ──
 
   private async executeCommand(cmdId: string) {
-    const file = this.plugin.app.workspace.getActiveFile();
-    if (!file) return;
-
-    // v6.0: 智能同步 — 根据 syncTargets 执行 metadata/annotations 更新
+    // v6.0: 智能同步 — 需要当前文件
     if (cmdId === 'zdc-smart-sync') {
+      const file = this.plugin.app.workspace.getActiveFile();
+      if (!file) return;
       await this.runSmartSync(file);
       return;
     }
 
-    // 其他命令（插入行内引注、生成参考文献列表）走命令系统
+    // v7.2: 导入文献 — 不需要当前文件，直接执行命令系统
+    // 其他命令（插入行内引注、更新参考文献）走命令系统
     try {
       (this.plugin.app as any).commands.executeCommandById(
         `optimized-zotero-integration:${cmdId}`

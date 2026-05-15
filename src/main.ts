@@ -18,10 +18,10 @@ import {
 import { getBibFromCiteKeys } from './bbt/jsonRPC';
 import { SyncFloatingButton } from './bbt/SyncFloatingButton';
 import { CitationEngine } from './citation/citationEngine';
-import { citationLivePreviewPlugin } from './citation/cm6LivePreview';
+import { citationLivePreviewPlugin, getActiveEditorView } from './citation/cm6LivePreview';
 import { createCitationPostProcessor } from './citation/readingMode';
 import { CitationPopoverManager } from './citation/hoverPopover';
-import { initBibliographyWriter, setBibliographyHeading, hasBibHeading } from './citation/bibliographyWriter';
+import { initBibliographyWriter, setBibliographyHeading, hasBibHeading, updateBibliographyText, markBibClean } from './citation/bibliographyWriter';
 
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
@@ -120,11 +120,8 @@ export default class ZoteroConnector extends Plugin {
         this.settings.titleMarqueeEnabled || false,
         this.settings.titleMarqueeDuration || 15
       );
-      // CSL 样式变更时清除引注缓存并刷新 CSL XML
+      // 设置变更时清除引注缓存
       this.citationEngine?.invalidateCache();
-      this.citationEngine?.refreshCslXml().then(() => {
-          this.dispatchOnAllViews();
-      });
     });
 
     this.updatePDFUtility();
@@ -214,7 +211,70 @@ export default class ZoteroConnector extends Plugin {
       },
     });
 
-    // 命令 B：扫描 [@citekey] 引用，批量生成/更新参考文献列表
+    // 命令 B：手动更新文末参考文献列表（v7.1 解耦自动触发）
+    this.addCommand({
+      id: 'update-bibliography',
+      name: t('command.updateBibliography'),
+      editorCallback: async (_editor) => {
+        const view = getActiveEditorView();
+        if (!view || (view as any).isDestroyed) {
+          new Notice('⚠️ 未找到活跃的编辑器视图', 3000);
+          return;
+        }
+        try {
+          updateBibliographyText(view);
+          markBibClean();
+          try { this.emitter.trigger('bibClean'); } catch { /* 静默 */ }
+          new Notice('✅ ' + t('notice.bibliographyUpdated'), 3000);
+        } catch (e) {
+          console.error('[update-bibliography]', e);
+          new Notice('❌ 更新参考文献失败', 4000);
+        }
+      },
+    });
+
+    // 命令 C：导入文献条目 — 从 Zotero 选择条目并创建带完整属性映射的笔记
+    this.addCommand({
+      id: 'zdc-import-literature',
+      name: t('command.importLiterature'),
+      callback: async () => {
+        const database = {
+          database: this.settings.database,
+          port: this.settings.port,
+        };
+        try {
+          const citeKeys = await getCiteKeys(database);
+          if (!citeKeys.length) return;
+
+          const progressNotice = new Notice('正在导入文献...', 0);
+          try {
+            const plainExportFormat: ExportFormat = {
+              name: '__import__',
+              outputPathTemplate: this.settings.baseStorageFolder
+                ? `${this.settings.baseStorageFolder}/{{citekey}}`
+                : '{{citekey}}',
+              imageOutputPathTemplate: '{{citekey}}/',
+              imageBaseNameTemplate: 'image',
+            };
+
+            const paths = await exportToMarkdown(
+              { settings: this.settings, database, exportFormat: plainExportFormat },
+              citeKeys,
+            );
+            progressNotice.hide();
+            new Notice(`✅ 已导入 ${paths.length} 篇文献`, 3000);
+            this.openNotes(paths);
+          } catch (e) {
+            progressNotice.hide();
+            throw e;
+          }
+        } catch (e) {
+          console.error('[import-literature]', e);
+          new Notice(`❌ 导入失败：${e instanceof Error ? e.message : 'Unknown error'}`, 5000);
+        }
+      },
+    });
+
 // ── v4.0 保留命令 ──
 
     this.addCommand({
@@ -633,15 +693,4 @@ export default class ZoteroConnector extends Plugin {
       editor.replaceRange?.('\n\n## 参考文献\n\n', cursor);
     }
   }
-	/** v6.8: CSL XML 抓取完成后触发所有活跃 Markdown 编辑器 recompute */
-	private dispatchOnAllViews() {
-		this.app.workspace.iterateAllLeaves((leaf) => {
-			try {
-				const cm = (leaf.view as any)?.editor?.cm;
-				if (cm?.dispatch && !cm.isDestroyed) {
-					cm.dispatch({});
-				}
-			} catch { /* leaf might not have editor */ }
-		});
-	}
 }

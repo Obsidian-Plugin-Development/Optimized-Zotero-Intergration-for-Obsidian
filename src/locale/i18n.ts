@@ -184,7 +184,9 @@ const en: StringMap = {
   'command.dataExplorer': 'Data explorer',
   'command.smartSync': 'Smart Sync',
   'command.insertInlineCitation': 'Insert Inline Citation',
+  'command.importLiterature': 'Import Literature',
   'command.generateBibliography': 'Generate Bibliography',
+  'command.updateBibliography': 'Sync Bibliography',
 
   // ── 模态框 / 提示 ──
   'modal.fetchingData': 'Fetching data from Zotero...',
@@ -321,15 +323,13 @@ const en: StringMap = {
     'Deprecated. Use the separate Inline CSL and Bibliography CSL fields below.',
   'settings.sync.cslStyle.placeholder': 'e.g. chicago-author-date',
 
-  // ── v6.1 Dual CSL ──
-  'settings.citation.inlineCslStyle': 'Inline CSL Style',
+  // ── v6.1 Dual CSL (v7.0 deprecated: hardcoded Nature format) ──
+  'settings.citation.inlineCslStyle': 'Inline CSL Style (Deprecated)',
   'settings.citation.inlineCslStyle.desc':
-    'CSL style for inline citation numbers (e.g. [1], [2]).',
-  'settings.citation.inlineCslStyle.placeholder': 'e.g. chicago-author-date',
-  'settings.citation.bibliographyCslStyle': 'Bibliography CSL Style',
+    'Deprecated. Hardcoded Nature superscript format is used for inline citations.',
+  'settings.citation.bibliographyCslStyle': 'Bibliography CSL Style (Deprecated)',
   'settings.citation.bibliographyCslStyle.desc':
-    'CSL style for bibliography formatting in popovers and reference lists.',
-  'settings.citation.bibliographyCslStyle.placeholder': 'e.g. gb-t-7714-2015',
+    'Deprecated. Hardcoded Nature format is used for bibliography assembly.',
   'settings.citation.bibliographyHeading': 'Bibliography Heading',
   'settings.citation.bibliographyHeading.desc':
     'Native Markdown heading for locating and auto-generating the bibliography section (omit the #).',
@@ -547,7 +547,9 @@ const zhCN: StringMap = {
   'command.dataExplorer': '数据浏览器',
   'command.smartSync': '智能同步',
   'command.insertInlineCitation': '插入行内引注',
+  'command.importLiterature': '导入文献条目',
   'command.generateBibliography': '生成参考文献列表',
+  'command.updateBibliography': '同步参考文献列表',
 
   // ── 模态框 / 提示 ──
   'modal.fetchingData': '正在从 Zotero 获取数据...',
@@ -681,15 +683,13 @@ const zhCN: StringMap = {
     '已弃用。请使用下方独立的行内 CSL 和参考文献 CSL 字段。',
   'settings.sync.cslStyle.placeholder': '例如：gb-t-7714-2015',
 
-  // ── v6.1 双轨 CSL ──
-  'settings.citation.inlineCslStyle': '行内引注 CSL 样式',
+  // ── v6.1 双轨 CSL（v7.0 废弃：已硬编码 Nature 格式）──
+  'settings.citation.inlineCslStyle': '行内引注 CSL 样式（已弃用）',
   'settings.citation.inlineCslStyle.desc':
-    '用于行内引注编号（如 [1]、[2]）的 CSL 样式。',
-  'settings.citation.inlineCslStyle.placeholder': '例如：chicago-author-date',
-  'settings.citation.bibliographyCslStyle': '参考文献 CSL 样式',
+    '已弃用。行内引注已硬编码为 Nature 风格上标数字。',
+  'settings.citation.bibliographyCslStyle': '参考文献 CSL 样式（已弃用）',
   'settings.citation.bibliographyCslStyle.desc':
-    '用于悬浮弹窗和文末参考文献格式化的 CSL 样式。',
-  'settings.citation.bibliographyCslStyle.placeholder': '例如：gb-t-7714-2015',
+    '已弃用。参考文献已硬编码为 Nature 风格本地组装。',
   'settings.citation.bibliographyHeading': '参考文献区块标题',
   'settings.citation.bibliographyHeading.desc':
     '用于自动定位和生成文末参考文献的原生 Markdown 标题名称（无需输入 # 号）。',

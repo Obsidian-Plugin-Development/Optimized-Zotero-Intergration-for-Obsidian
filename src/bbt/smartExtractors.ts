@@ -45,24 +45,39 @@ function extractTitleSmart(item: any): string {
   return rawTitle;
 }
 
+/**
+ * 智能作者提取 — 三个独立字段（v7.0 列表化格式）
+ *
+ * 始终返回三个语义独立的字段：
+ *   1. 第一作者 + 双匕首 ‡ (U+2021)
+ *   2. 通讯作者 + 信封 ✉︎ (U+2709 U+FE0E)
+ *   3. et al.（仅当作者数 ≥ 3；否则不包含此项）
+ *
+ * | 作者数 | 返回数组 |
+ * |--------|---------|
+ * | 0      | [] |
+ * | 1      | ["Author ‡", "Author ✉︎"] |
+ * | 2      | ["Author1 ‡", "Author2 ✉︎"] |
+ * | 3+     | ["Author1 ‡", "AuthorN ✉︎", "et al."] |
+ */
 function extractAuthorsSmart(item: any): string[] {
   const creators = item.creators || [];
   if (creators.length === 0) return [];
 
   const firstAuthor = creatorFullName(creators[0]);
-
-  if (creators.length === 1) {
-    return [`${firstAuthor} \u2021 \u2709\uFE0E`];
-  }
-
   const lastCreator = creators[creators.length - 1];
   const corresponding = creatorFullName(lastCreator);
 
-  if (creators.length === 2) {
-    return [`${firstAuthor} \u2021`, `${corresponding} \u2709\uFE0E`];
+  const result: string[] = [
+    `${firstAuthor} \u2021`,
+    `${corresponding} \u2709\uFE0E`,
+  ];
+
+  if (creators.length >= 3) {
+    result.push('et al.');
   }
 
-  return [`${firstAuthor} \u2021`, `${corresponding} \u2709\uFE0E`, 'et al.'];
+  return result;
 }
 
 function extractYear(item: any): string {

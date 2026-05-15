@@ -1,49 +1,19 @@
 /**
- * v6.0 CSL 引注引擎
+ * v7.0 引注引擎（轻量化）
  *
  * 职责：扫描文档 [@citekey]、批量解析 BBT 数据、按首次出现顺序分配编号、缓存结果。
- * 此模块无 UI 依赖，同时服务于 CM6 ViewPlugin、PostProcessor、悬浮弹窗。
+ * 无 CSL 依赖 — 行内渲染硬编码上标，文末参考文献由 bibliographyWriter 本地组装。
  */
 import type ZoteroConnector from '../main';
 import { getBibFromCiteKey, getBibFromCiteKeys, getItemJSONFromCiteKeys } from '../bbt/jsonRPC';
 import type { CiteKey } from '../bbt/cayw';
 import type { DatabaseWithPort } from '../types';
-import type { CitationCacheEntry, CitationData, CitationFormat, DocumentScanResult } from './citationTypes';
-import { requestUrl } from 'obsidian';
+import type { CitationCacheEntry, CitationData, DocumentScanResult } from './citationTypes';
 
 /** 5 分钟缓存有效期 */
 const CACHE_TTL_MS = 5 * 60 * 1000;
 /** BBT 批量解析防抖延迟 */
 const RESOLVE_DEBOUNCE_MS = 300;
-
-/**
- * 从 CSL XML 中提取行内引注格式外壳。
- *
- * 解析 <citation><layout> 元素的属性，提取 prefix/suffix/delimiter
- * 以及 vertical-align 标记。不依赖 XML 解析器，用正则快速提取。
- *
- * 示例输入：
- *   <layout prefix="[" suffix="]" delimiter=", ">
- *   <layout prefix="(" suffix=")" delimiter=";">
- *   <layout vertical-align="sup">
- *
- * 未匹配到 layout 时回退为方括号格式 [n]。
- */
-function extractCitationFormat(cslXml: string): CitationFormat {
-	if (!cslXml) return { prefix: '[', suffix: ']', delimiter: ', ', superscript: false };
-
-	// 匹配 <citation> 内第一个 <layout ...> 的属性
-	const layoutMatch = cslXml.match(/<layout\b([^>]*)>/);
-	if (!layoutMatch) return { prefix: '[', suffix: ']', delimiter: ', ', superscript: false };
-
-	const attrs = layoutMatch[1];
-	const prefix = attrs.match(/prefix\s*=\s*"([^"]*)"/)?.[1] ?? '[';
-	const suffix = attrs.match(/suffix\s*=\s*"([^"]*)"/)?.[1] ?? ']';
-	const delimiter = attrs.match(/delimiter\s*=\s*"([^"]*)"/)?.[1] ?? ', ';
-	const superscript = /vertical-align\s*=\s*"sup"/.test(attrs);
-
-	return { prefix, suffix, delimiter, superscript };
-}
 
 /**
  * v6.2 从 Zotero 条目 JSON 中鲁棒提取 URL 和 DOI。
@@ -80,14 +50,10 @@ export class CitationEngine {
 	private individualBibHtmlCache = new Map<string, string>();
 	/** 逐篇元数据缓存（DOI、URL）— 独立于 batch fetch 的 formattedHtml */
 	private individualMetaCache = new Map<string, { doi?: string; url?: string }>();
-	/** 合并参考文献 HTML 缓存（供 bibliography widget 渲染） */
+	/** 合并参考文献 HTML 缓存（供 hover popover 批量渲染） */
 	private combinedBibCache = new Map<string, string>();
-	/** v6.8: CSL XML 缓存（抓取自 inlineCslStyle URL），供 extractCitationFormat 解析 */
-	private _cachedCslXml: string | null = null;
-	/** 记录缓存 CSL XML 对应的样式标识符，用于 invalidation 判断 */
-	private _cachedCslStyle: string = '';
-	/** v6.8: CSL 格式版本号，refreshCslXml 成功时递增，供 ViewPlugin 检测重新 compute */
-	public cslFormatVersion = 0;
+	/** v7.0: 逐篇 CSL-JSON 元数据缓存（供 bibliographyWriter 本地组装 Nature 格式） */
+	private individualJsonCache = new Map<string, any>();
 
 	constructor(plugin: ZoteroConnector) {
 		this.plugin = plugin;
@@ -104,94 +70,6 @@ export class CitationEngine {
 		syncKeyToNumber(map: Map<string, number>): void {
 			this.currentKeyToNumber = map;
 		}
-	/** 获取 inline CSL 样式（兼容旧 settings.cslStyle） */
-	private get inlineCsl(): string | undefined {
-		return this.plugin.settings.inlineCslStyle || this.plugin.settings.cslStyle || undefined;
-	}
-
-	/** 获取 bibliography CSL 样式 */
-	private get bibliographyCsl(): string | undefined {
-		return this.plugin.settings.bibliographyCslStyle || this.plugin.settings.cslStyle || undefined;
-	}
-
-	// ── CSL 格式外壳提取 ──
-	private _cachedFormat: CitationFormat | null = null;
-	private _cachedFormatStyle: string | undefined;
-
-	/**
-	 * 从当前 inline CSL 样式 XML 中提取引注格式外壳（prefix/suffix/delimiter）。
-	 * 结果缓存，仅在 CSL 样式变更时重新解析。
-	 *
-	 * 支持的 CSL <layout> 属性：
-	 *   prefix="[" suffix="]" delimiter=", "           → 方括号 (默认)
-	 *   prefix="(" suffix=")" delimiter="; "           → 圆括号
-	 *   vertical-align="sup"                           → 上标 (Nature 等)
-	 */
-	getCitationFormat(): CitationFormat {
-		const style = this.inlineCsl || '';
-		if (this._cachedFormat && this._cachedFormatStyle === style) {
-			return this._cachedFormat;
-		}
-		this._cachedFormatStyle = style;
-		// v6.8: 优先使用抓取到的 CSL XML；若未就绪则回退到 style 标识符
-		const xml = this._cachedCslXml || style;
-		this._cachedFormat = extractCitationFormat(xml);
-		return this._cachedFormat;
-	}
-
-	/**
-	 * v6.8 抓取并缓存 inline CSL 样式 XML。
-	 *
-	 * 从 inlineCslStyle 设置项（URL 或样式名称）异步加载 CSL XML，
-	 * 缓存后供 getCitationFormat() 同步解析。
-	 *
-	 * 调用时机：插件初始化、CSL 样式设置变更。
-	 */
-	async refreshCslXml(): Promise<void> {
-		const style = this.inlineCsl;
-		if (!style) {
-			this._cachedCslXml = null;
-			this._cachedCslStyle = '';
-			return;
-		}
-
-		// 若已缓存且样式未变，跳过
-		if (this._cachedCslXml && this._cachedCslStyle === style) return;
-
-		this._cachedCslStyle = style;
-
-		// 构造 CSL 文件 URL
-		let url: string;
-		if (/^https?:\/\//i.test(style)) {
-			url = style;
-		} else {
-			// 样式名自动补全
-			const name = style.replace(/\.csl$/i, '');
-			url = `https://www.zotero.org/styles/${name}`;
-		}
-
-		try {
-			const resp = await requestUrl({ url, method: 'GET' });
-			if (resp.status === 200 && resp.text) {
-				this._cachedCslXml = resp.text;
-				// 清空旧的 CitationFormat 缓存，下次调用 getCitationFormat() 重新解析
-				this._cachedFormat = null;
-				this.cslFormatVersion++;
-			}
-		} catch (e) {
-			console.warn('[CitationEngine] Failed to fetch CSL XML from:', url, e);
-			// 保留旧缓存，下次重试
-		}
-	}
-
-	/** v6.8 强制清除 CSL XML 缓存（供 invalidateCache 调用） */
-	private invalidateCslXml(): void {
-		this._cachedCslXml = null;
-		this._cachedCslStyle = '';
-		this._cachedFormat = null;
-		this._cachedFormatStyle = undefined;
-	}
-
 	/**
 	 * 扫描文档全文，返回所有 [@citekey] 的位置与全局编号。
 	 * 编号按首次出现顺序分配（多引注 [@a; @b] 中每个 key 独立编号）。
@@ -301,17 +179,17 @@ export class CitationEngine {
 			port: (this.plugin.settings as any).port,
 		};
 
-		// 使用参考文献 CSL 获取完整 bibliography HTML（用于悬浮弹窗）
-		const bibCsl = this.bibliographyCsl;
+		// v7.0: 硬编码 Nature CSL 用于 BBT 格式化
+		const bibCsl = 'nature';
 
 		// 构造 CiteKey[] — library 默认 1，BBT 会正确解析
 		const citeKeyObjs: CiteKey[] = keys.map((k) => ({ key: k, library: 1 }));
 
 		try {
-			// 批量获取参考文献 HTML（使用 Bibliography CSL）
+			// 批量获取参考文献 HTML（Nature 格式，用于悬浮弹窗）
 			const bibHtml = await getBibFromCiteKeys(citeKeyObjs, database, bibCsl, 'html', true);
 
-			// 批量获取条目 JSON（含 DOI、URL、itemKey、libraryID）
+			// 批量获取条目 JSON（含完整 CSL-JSON 元数据 + DOI、URL、itemKey、libraryID）
 			let itemsJson: any[] = [];
 			try {
 				const raw = await getItemJSONFromCiteKeys(citeKeyObjs, database, 1);
@@ -322,7 +200,7 @@ export class CitationEngine {
 				// 非致命：JSON 获取失败不影响参考文献渲染
 			}
 
-			// 为每个 citekey 构建 CitationData
+			// 为每个 citekey 构建 CitationData + 缓存 CSL-JSON
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];
 				const item = itemsJson[i] || {};
@@ -331,6 +209,11 @@ export class CitationEngine {
 				const doi = item.DOI || item.doi || '';
 				const url = item.url || '';
 				const num = this.currentKeyToNumber.get(key) || 0;
+
+				// v7.0: 缓存完整 CSL-JSON 元数据供 bibliographyWriter 本地组装
+				if (item && Object.keys(item).length > 0) {
+					this.individualJsonCache.set(key, item);
+				}
 
 				const data: CitationData = {
 					number: num,
@@ -379,11 +262,10 @@ export class CitationEngine {
 			database: this.plugin.settings.database,
 			port: (this.plugin.settings as any).port,
 		};
-		const bibCsl = this.bibliographyCsl;
 		const citeKey: CiteKey = { key, library: 1 };
 
 		try {
-			const html = await getBibFromCiteKey(citeKey, database, bibCsl, 'html', true);
+			const html = await getBibFromCiteKey(citeKey, database, 'nature', 'html', true);
 			const result = html || '';
 			this.individualBibHtmlCache.set(key, result);
 			return result;
@@ -400,6 +282,15 @@ export class CitationEngine {
 	getIndividualBibHtmlCached(key: string): string | undefined {
 		const cached = this.individualBibHtmlCache.get(key);
 		return cached !== undefined ? cached : undefined;
+	}
+
+	/**
+	 * v7.0 同步读取缓存的单篇 CSL-JSON 元数据。
+	 * 供 bibliographyWriter 本地组装 Nature 格式参考文献。
+	 * 若缓存未就绪则返回 undefined。
+	 */
+	getIndividualJsonCached(key: string): any | undefined {
+		return this.individualJsonCache.get(key);
 	}
 
 	/**
@@ -453,8 +344,9 @@ export class CitationEngine {
 
 		const uncachedBib = unique.filter(k => this.individualBibHtmlCache.get(k) === undefined);
 		const uncachedMeta = unique.filter(k => !this.individualMetaCache.has(k));
+		const uncachedJson = unique.filter(k => !this.individualJsonCache.has(k));
 
-		if (uncachedBib.length === 0 && uncachedMeta.length === 0) return;
+		if (uncachedBib.length === 0 && uncachedMeta.length === 0 && uncachedJson.length === 0) return;
 
 		// Fire‑and‑forget：不阻塞、不等待
 		(async () => {
@@ -462,13 +354,12 @@ export class CitationEngine {
 				database: this.plugin.settings.database,
 				port: (this.plugin.settings as any).port,
 			};
-			const bibCsl = this.bibliographyCsl;
 
-			// 逐篇拉取 bib HTML（独立请求，确保每篇文献 HTML 隔离）
+			// 逐篇拉取 bib HTML（Nature 格式，独立请求，确保每篇文献 HTML 隔离）
 			for (const key of uncachedBib) {
 				try {
 					const html = await getBibFromCiteKey(
-						{ key, library: 1 }, database, bibCsl, 'html', true,
+						{ key, library: 1 }, database, 'nature', 'html', true,
 					);
 					this.individualBibHtmlCache.set(key, html || '');
 				} catch {
@@ -476,7 +367,25 @@ export class CitationEngine {
 				}
 			}
 
-			// 批量拉取元数据（一次 BBT 调用覆盖所有 key，高效）
+			// v7.0: 批量拉取 CSL-JSON 元数据（供 bibliographyWriter 本地组装）
+			if (uncachedJson.length > 0) {
+				try {
+					const citeKeyObjs: CiteKey[] = uncachedJson.map(k => ({ key: k, library: 1 }));
+					const raw = await getItemJSONFromCiteKeys(citeKeyObjs, database, 1, true);
+					const items: any[] = Array.isArray(raw) ? raw : [];
+					for (let i = 0; i < uncachedJson.length; i++) {
+						const key = uncachedJson[i];
+						const item = items[i] || {};
+						if (item && Object.keys(item).length > 0) {
+							this.individualJsonCache.set(key, item);
+						}
+					}
+				} catch {
+					// 静默失败
+				}
+			}
+
+			// 批量拉取元数据（DOI/URL — 一次 BBT 调用覆盖所有 key，高效）
 			if (uncachedMeta.length > 0) {
 				try {
 					const citeKeyObjs: CiteKey[] = uncachedMeta.map(k => ({ key: k, library: 1 }));
@@ -521,9 +430,8 @@ export class CitationEngine {
 				port: (this.plugin.settings as any).port,
 			};
 			const citeKeyObjs: CiteKey[] = keys.map(k => ({ key: k, library: 1 }));
-			const bibCsl = this.bibliographyCsl;
 			try {
-				const html = await getBibFromCiteKeys(citeKeyObjs, database, bibCsl, 'html', true);
+				const html = await getBibFromCiteKeys(citeKeyObjs, database, 'nature', 'html', true);
 				// 清洗 CSL 残留内联样式
 				const cleaned = (html || '')
 					.replace(/color\s*:\s*[^;>"]+[;>"]?\s*/gi, '')
@@ -542,8 +450,8 @@ export class CitationEngine {
 		this.cache.clear();
 		this.individualBibHtmlCache.clear();
 		this.individualMetaCache.clear();
+		this.individualJsonCache.clear();
 		this.combinedBibCache.clear();
-		this.invalidateCslXml();
 	}
 
 	/** 查询缓存中的单个 citekey */

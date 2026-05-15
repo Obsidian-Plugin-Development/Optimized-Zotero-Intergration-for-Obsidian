@@ -1,19 +1,21 @@
 /**
- * v6.7 Bibliography Text Writer — 原生标题驱动的纯文本静默同步
+ * v7.2 Bibliography Writer — 智能标题生命周期 + CSL HTML→MD + 严格控行
  *
- * 彻底废弃 Widget 渲染与特殊锚点（HTML 注释、代码块）。
- * 使用用户自定义的 Markdown 标题定位，在其下方安全区内写入纯文本有序列表。
+ * 恢复 CSL 引擎处理参考文献，固定使用 Nature 样式。
+ * BBT 生成 HTML 后，本地转换为 Markdown（斜体→*、粗体→**、剥离其余标签）。
  *
  * 触发时机：
- *   1. cm6LivePreview 扫描到引注变动
- *   2. 用户在悬浮窗 Edit Modal 中修改完成
+ *   仅通过全局命令 sync-bibliography 或悬浮球菜单手动触发。
+ *   绝对禁止在引注插入/修改/删除时自动更新文末列表。
  *
- * 安全阀（三层防死循环）：
- *   1. 1000ms 防抖 — 连续编辑合并为单次扫描
- *   2. 严禁写时 Fetch — 缓存 miss 直接 return，等待后台预缓存
- *   3. 严格 Diff 比对 — newText.trim() === oldText.trim() → 跳过写入
+ * 智能标题管理：
+ *   场景 A：正文无引注 + 存在标题 → 彻底删除标题及下方旧列表
+ *   场景 B：正文有引注 + 无标题 → 在文档 EOF 自动创建标题+列表
+ *   场景 C：正文有引注 + 已有标题 → 严格双空行更新列表内容
  *
- * v6.8: 按文档物理位置排序参考文献（keyPositions），使用 individual cache 替代 combined cache。
+ * 状态指示：
+ *   isBibOutOfSync — 正文引注变动时置 true，写入完成后置 false。
+ *   悬浮球根据此标志切换 file-pen / file-text 图标。
  */
 import { EditorView } from '@codemirror/view';
 import type { CitationEngine } from './citationEngine';
@@ -22,9 +24,37 @@ import { citationStore } from './citationStore';
 // ── 模块级状态 ──
 let _bibEngine: CitationEngine;
 let _bibHeading = '参考文献';
-let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
-let _pendingView: EditorView | null = null;
-const DEBOUNCE_MS = 1000;
+export let isBibOutOfSync = false;
+
+/** dirty 状态变更回调列表 */
+const dirtyCallbacks: Array<(dirty: boolean) => void> = [];
+
+/** 注册 dirty 状态变更回调（供 SyncFloatingButton 监听图标切换） */
+export function onBibDirtyChange(cb: (dirty: boolean) => void): () => void {
+	dirtyCallbacks.push(cb);
+	return () => {
+		const idx = dirtyCallbacks.indexOf(cb);
+		if (idx >= 0) dirtyCallbacks.splice(idx, 1);
+	};
+}
+
+function setBibDirty(dirty: boolean) {
+	if (isBibOutOfSync === dirty) return;
+	isBibOutOfSync = dirty;
+	for (const cb of dirtyCallbacks) {
+		try { cb(dirty); } catch { /* 静默 */ }
+	}
+}
+
+/** 正文引注变动时调用（cm6LivePreview 触发） */
+export function markBibDirty() {
+	setBibDirty(true);
+}
+
+/** 参考文献写入完成后调用（sync-bibliography 命令触发） */
+export function markBibClean() {
+	setBibDirty(false);
+}
 
 export function initBibliographyWriter(engine: CitationEngine, heading: string) {
 	_bibEngine = engine;
@@ -34,17 +64,6 @@ export function initBibliographyWriter(engine: CitationEngine, heading: string) 
 /** 运行时更新参考文献标题（设置变更时调用） */
 export function setBibliographyHeading(heading: string) {
 	_bibHeading = heading || '参考文献';
-}
-
-export function scheduleBibliographyUpdate(view: EditorView) {
-	_pendingView = view;
-	if (_debounceTimer) return;
-	_debounceTimer = setTimeout(() => {
-		_debounceTimer = null;
-		const v = _pendingView;
-		_pendingView = null;
-		if (v && !(v as any).isDestroyed) updateBibliographyText(v);
-	}, DEBOUNCE_MS);
 }
 
 // ── 辅助：正则特殊字符转义 ──
@@ -60,27 +79,44 @@ function buildHeadingPattern(): RegExp {
 	return new RegExp(`^(#+)\\s+(${escaped})\\s*$`, 'im');
 }
 
-// ── 单个 entry HTML → 纯文本（去 CSL 序号）──
+// ── CSL HTML → Markdown 转换 ──
 
-function entryHtmlToPlainText(html: string, index: number): string {
-	if (!html) return '';
-	const doc = new DOMParser().parseFromString(html, 'text/html');
+/**
+ * 将 CSL 引擎生成的单篇参考文献 HTML 转换为 Markdown。
+ *
+ * 规则：
+ *   - <i> / <em> → *（斜体，单星号）
+ *   - <b> / <strong> → **（粗体，双星号）
+ *   - 剥离其余所有 HTML 标签
+ *   - 解码常见 HTML 实体
+ *
+ * v7.2: 修复双重序号 — 转换后剥离 CSL 引擎自带的行首编号（如 1. [1] (1) 等）。
+ */
+function htmlToMarkdown(html: string): string {
+	let md = html
+		// 解码常见 HTML 实体
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		// 斜体：<i> / <em> → *
+		.replace(/<\/?i\b[^>]*>/g, '*')
+		.replace(/<\/?em\b[^>]*>/g, '*')
+		// 粗体：<b> / <strong> → **
+		.replace(/<\/?b\b[^>]*>/g, '**')
+		.replace(/<\/?strong\b[^>]*>/g, '**')
+		// 剥离剩余所有 HTML 标签
+		.replace(/<[^>]*>/g, '')
+		// 合并多余空白
+		.replace(/\s+/g, ' ')
+		.trim();
 
-	// 尝试提取 .csl-entry
-	const entryDiv = doc.body.querySelector('.csl-entry');
-	if (entryDiv) {
-		let text = (entryDiv.textContent || '').replace(/\s+/g, ' ').trim();
-		if (!text) return '';
-		// 剔除 CSL 原生序号
-		text = text.replace(/^[\[\(]?\d+[\]\)]?[\.\:]?\s*/, '').trim();
-		return text ? `${index}. ${text}` : '';
-	}
+	// ★ v7.2: 暴力剔除 CSL 引擎自带的行首编号（修复双重序号 1. 1. xxx）
+	// 处理格式：1.、[1]、1:、(1)、1 等，后跟可选空格
+	md = md.replace(/^\s*\[?\d+\]?\s*[\.\:\)]\s*/, '').trim();
 
-	// 回退：整体提取文本
-	const rawText = (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
-	if (!rawText) return '';
-	const cleanText = rawText.replace(/^[\[\(]?\d+[\]\)]?[\.\:]?\s*/, '').trim();
-	return cleanText ? `${index}. ${cleanText}` : '';
+	return md;
 }
 
 // ── 安全区定位 ──
@@ -92,7 +128,7 @@ interface BibliographyZone {
 
 /**
  * 在文档中定位参考文献标题，返回其下方的"安全区"。
- * 使用用户设置的自定义标题构建动态正则。
+ * 安全区起点为标题行末尾 + 1，终点为下一个同级或更高级标题的位置。
  * 若未找到标题则返回 null。
  */
 function findBibliographyZone(docText: string): BibliographyZone | null {
@@ -124,62 +160,142 @@ export function hasBibHeading(docText: string): boolean {
 	return buildHeadingPattern().test(docText);
 }
 
-// ── 核心写入逻辑（纯同步！按文档物理位置排序）──
+// ── 辅助：获取按物理位置排序的 citekey 列表 ──
 
-function updateBibliographyText(view: EditorView) {
-	const docText = view.state.doc.toString();
-
-	// 1. 定位原生参考文献标题（动态正则）
-	const zone = findBibliographyZone(docText);
-	if (!zone) return;
-
-	// 2. 获取当前有序 citekey 列表 + 物理位置
+function getPositionSortedKeys(): string[] {
 	const { sortedUniqueKeys, keyPositions } = citationStore;
-	if (sortedUniqueKeys.length === 0) return;
-
-	// 3. ★ 按文档物理位置升序排序
-	const positionSorted = [...sortedUniqueKeys].sort(
+	return [...sortedUniqueKeys].sort(
 		(a, b) => (keyPositions.get(a) ?? Infinity) - (keyPositions.get(b) ?? Infinity),
 	);
+}
 
-	// 4. ★ 从 individual cache 按位置顺序提取每条文献文本（严禁写时 Fetch）
+// ── 辅助：从缓存组装 Markdown 条目列表 ──
+
+function assembleEntries(positionSorted: string[]): string[] | null {
 	const entries: string[] = [];
 	let allCached = true;
+
 	for (let i = 0; i < positionSorted.length; i++) {
 		const key = positionSorted[i];
-		const cachedHtml = _bibEngine.getIndividualBibHtmlCached(key);
-		if (cachedHtml === undefined) {
+		const html = _bibEngine.getIndividualBibHtmlCached(key);
+		if (html === undefined) {
 			allCached = false;
 			break;
 		}
-		const entryText = entryHtmlToPlainText(cachedHtml, i + 1);
-		if (entryText) entries.push(entryText);
+		const md = htmlToMarkdown(html);
+		if (md) {
+			entries.push(`${i + 1}. ${md}`);
+		}
 	}
 
 	if (!allCached) {
-		// 缓存 miss：触发后台异步拉取（fire-and-forget），本次放弃写入
 		_bibEngine.precacheAllBibs(positionSorted);
+		return null;
+	}
+
+	return entries;
+}
+
+// ── 核心写入逻辑 ──
+
+/**
+ * v7.2 参考文献全自动生命周期管理。
+ *
+ * 场景 A — 引注为空，打扫战场：
+ *   删除标题所在整行 + 下方旧列表，直到下一个同级标题或 EOF。
+ *
+ * 场景 B — 有引注，无标题，自动创建：
+ *   在文档 EOF 追加 \n\n## 标题\n\n列表\n。
+ *
+ * 场景 C — 有引注，已有标题，精确更新：
+ *   安全区位置不变，插入 \n\n列表\n\n，确保标题与第一条文献之间始终隔一个空行。
+ */
+export function updateBibliographyText(view: EditorView) {
+	const docText = view.state.doc.toString();
+	const headingPattern = buildHeadingPattern();
+	const headingMatch = headingPattern.exec(docText);
+
+	const positionSorted = getPositionSortedKeys();
+
+	// ═══════════════════════════════════════════
+	// 场景 A：无引注 + 存在标题 → 彻底打扫战场
+	// ═══════════════════════════════════════════
+	if (positionSorted.length === 0 && headingMatch) {
+		const headingStart = headingMatch.index;
+		const headingLevel = headingMatch[1].length;
+
+		// 终点：下一个同级或更高级标题，若没有则到 EOF
+		const searchStart = headingMatch.index + headingMatch[0].length;
+		const searchText = docText.slice(searchStart);
+		const nextHeadingPattern = new RegExp(`^#{1,${headingLevel}}\\s`, 'm');
+		const nextMatch = nextHeadingPattern.exec(searchText);
+		const deleteEnd = nextMatch ? searchStart + nextMatch.index : docText.length;
+
+		console.log('[BibWriter] Scenario A: deleting bibliography section ' +
+			headingStart + '-' + deleteEnd);
+		view.dispatch({
+			changes: { from: headingStart, to: deleteEnd, insert: '' },
+		});
+
+		setBibDirty(false);
 		return;
 	}
 
-	if (entries.length === 0) return;
-	const newText = '\n' + entries.join('\n') + '\n';
+	// 无引注且无标题 → 无事可做
+	if (positionSorted.length === 0) return;
 
-	// 5. 提取安全区内旧文本
+	// ── 从缓存组装条目 ──
+	const entries = assembleEntries(positionSorted);
+	if (entries === null) return;       // 缓存 miss，已触发后台拉取
+	if (entries.length === 0) return;
+
+	const markdownList = entries.join('\n');
+
+	// ═══════════════════════════════════════════
+	// 场景 B：有引注 + 无标题 → 在 EOF 自动创建
+	// ═══════════════════════════════════════════
+	if (!headingMatch) {
+		const headingText = _bibHeading;
+		// 默认使用 ## 级别，若用户在设置中指定了包含 # 的格式则尊重
+		const insertText = '\n\n## ' + headingText + '\n\n' + markdownList + '\n';
+		const eof = docText.length;
+
+		console.log('[BibWriter] Scenario B: auto-creating bibliography at EOF (' +
+			entries.length + ' entries)');
+		view.dispatch({
+			changes: { from: eof, to: eof, insert: insertText },
+		});
+
+		setBibDirty(false);
+		return;
+	}
+
+	// ═══════════════════════════════════════════
+	// 场景 C：有引注 + 已有标题 → 精确更新
+	// ═══════════════════════════════════════════
+	const zone = findBibliographyZone(docText);
+	if (!zone) return;
+
+	// ★ v7.2: 严格双空行控制 — \n\n列表\n\n
+	const finalInsertText = '\n\n' + markdownList.trim() + '\n\n';
+
 	const oldText = docText.slice(zone.from, zone.to);
 
-	// 6. ★ 严格 Diff 比对（核心防死循环）
-	if (newText.trim() === oldText.trim()) return;
+	// 严格 Diff 比对（防死循环）
+	if (finalInsertText.trim() === oldText.trim()) return;
 
-	// 7. 原子化静默写入
 	if (zone.from > zone.to || zone.from > docText.length) {
 		console.warn('[BibWriter] Invalid zone bounds from=' + zone.from +
 			' to=' + zone.to + ' docLen=' + docText.length + ' — skipping');
 		return;
 	}
-	console.log('[BibWriter] Writing bibliography (' +
-		entries.length + ' entries, position-sorted) zone ' + zone.from + '-' + zone.to);
+
+	console.log('[BibWriter] Scenario C: updating bibliography (' +
+		entries.length + ' entries) zone ' + zone.from + '-' + zone.to);
 	view.dispatch({
-		changes: { from: zone.from, to: zone.to, insert: newText },
+		changes: { from: zone.from, to: zone.to, insert: finalInsertText },
 	});
+
+	// 写入成功 → 标记为已同步
+	setBibDirty(false);
 }

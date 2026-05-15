@@ -26,7 +26,7 @@ import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
 import { updateCitationStore } from './citationStore';
 import type { CitationStore, CitePos } from './citationStore';
-import { scheduleBibliographyUpdate } from './bibliographyWriter';
+import { markBibDirty } from './bibliographyWriter';
 
 // ── 模块级闭包引用 ──
 let _engine: CitationEngine;
@@ -101,7 +101,12 @@ function foldNumbers(sortedUnique: number[]): string {
 	return parts.join(', ');
 }
 
-function computeInlineHtml(keys: string[]): string {
+/**
+ * v7.0 硬编码上标数字渲染（无 CSL 依赖）。
+ * 返回纯文本数字（如 "1" 或 "1-3"），
+ * Widget 通过 CSS 类 .custom-citation-inline 实现上标效果。
+ */
+function computeInlineText(keys: string[]): string {
 	const numbers: number[] = [];
 	for (const k of keys) {
 		const num = _engine.getNumber(k);
@@ -110,13 +115,7 @@ function computeInlineHtml(keys: string[]): string {
 	if (numbers.length === 0) return '';
 
 	const sortedUnique = [...new Set(numbers)].sort((a, b) => a - b);
-	const folded = foldNumbers(sortedUnique);
-	const fmt = _engine.getCitationFormat();
-
-	if (fmt.superscript) {
-		return `<sup>${folded}</sup>`;
-	}
-	return fmt.prefix + folded + fmt.suffix;
+	return foldNumbers(sortedUnique);
 }
 
 // ── Widget ──
@@ -124,7 +123,7 @@ function computeInlineHtml(keys: string[]): string {
 class InlineCitationWidget extends WidgetType {
 	constructor(
 		private readonly keys: string[],
-		private readonly displayHtml: string,
+		private readonly displayText: string,
 		private readonly from: number,
 		private readonly to: number,
 	) {
@@ -137,11 +136,12 @@ class InlineCitationWidget extends WidgetType {
 		const span = document.createElement('span');
 		span.addClass('custom-citation-inline');
 
-		if (!this.displayHtml) {
+		if (!this.displayText) {
 			span.setText('[?]');
 			span.style.opacity = '0.5';
 		} else {
-			span.innerHTML = this.displayHtml;
+			// v7.0: 纯文本 + CSS 上标（无 <sup> 标签、无 HTML 注入）
+			span.setText(this.displayText);
 		}
 
 		span.setAttribute('data-citation-keys', this.keys.join(','));
@@ -152,7 +152,7 @@ class InlineCitationWidget extends WidgetType {
 
 	eq(other: InlineCitationWidget): boolean {
 		return this.keys.join(',') === other.keys.join(',')
-			&& this.displayHtml === other.displayHtml
+			&& this.displayText === other.displayText
 			&& this.from === other.from
 			&& this.to === other.to;
 	}
@@ -187,17 +187,14 @@ function scanDocumentForCitations(docText: string): CitePos[] {
 
 class CitationPluginValue implements PluginValue {
 	decorations: DecorationSet;
-	private _lastCslVersion = _engine.cslFormatVersion;
 
 	constructor(private view: EditorView) {
 		this.decorations = this.compute();
 	}
 
 	update(update: ViewUpdate) {
-		const cslChanged = _engine.cslFormatVersion !== this._lastCslVersion;
-		if (cslChanged) this._lastCslVersion = _engine.cslFormatVersion;
 		const citationAffected = update.docChanged && this.changeAffectsCitations(update);
-		if (citationAffected || update.viewportChanged || update.selectionSet || cslChanged) {
+		if (citationAffected || update.viewportChanged || update.selectionSet) {
 			this.decorations = this.compute();
 		}
 	}
@@ -247,8 +244,9 @@ class CitationPluginValue implements PluginValue {
 			_engine.getCombinedBibliographyHtml(store.sortedUniqueKeys);
 		}
 
-		// ★ 触发文末参考文献纯文本同步（v6.6 替代 Widget 渲染）
-		scheduleBibliographyUpdate(this.view);
+		// ★ v7.1: 标记参考文献为 dirty（不再自动更新，由用户手动触发）
+		markBibDirty();
+		try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
 
 		const positions = scanDocumentForCitations(docText);
 		if (positions.length === 0) {
@@ -256,7 +254,7 @@ class CitationPluginValue implements PluginValue {
 		}
 
 		const visibleRanges = this.view.visibleRanges;
-		const ranges: Array<{ from: number; to: number; keys: string[]; displayHtml: string }> = [];
+		const ranges: Array<{ from: number; to: number; keys: string[]; displayText: string }> = [];
 		const unresolvedKeys = new Set<string>();
 
 		for (const pos of positions) {
@@ -274,8 +272,8 @@ class CitationPluginValue implements PluginValue {
 				}
 			}
 
-			const displayHtml = computeInlineHtml(pos.keys);
-			ranges.push({ from: pos.from, to: pos.to, keys: pos.keys, displayHtml });
+			const displayText = computeInlineText(pos.keys);
+			ranges.push({ from: pos.from, to: pos.to, keys: pos.keys, displayText });
 		}
 
 		if (unresolvedKeys.size > 0) {
@@ -285,9 +283,9 @@ class CitationPluginValue implements PluginValue {
 			});
 		}
 
-		const decos = ranges.map(({ from, to, keys, displayHtml }) =>
+		const decos = ranges.map(({ from, to, keys, displayText }) =>
 			Decoration.replace({
-				widget: new InlineCitationWidget(keys, displayHtml, from, to),
+				widget: new InlineCitationWidget(keys, displayText, from, to),
 				inclusiveStart: false,
 				inclusiveEnd: false,
 				block: false,

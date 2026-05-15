@@ -377,35 +377,6 @@ function CitationTab({
         />
       </SettingItem>
 
-
-      {/* v6.1 行内引注 CSL 样式 */}
-      <SettingItem
-        name={t('settings.citation.inlineCslStyle')}
-        description={t('settings.citation.inlineCslStyle.desc')}
-      >
-        <input
-          onChange={(e) => updateSetting('inlineCslStyle', (e.target as HTMLInputElement).value)}
-          type="text"
-          spellCheck={false}
-          placeholder={t('settings.citation.inlineCslStyle.placeholder')}
-          defaultValue={settings.inlineCslStyle || settings.cslStyle || ''}
-        />
-      </SettingItem>
-
-      {/* v6.1 参考文献 CSL 样式 */}
-      <SettingItem
-        name={t('settings.citation.bibliographyCslStyle')}
-        description={t('settings.citation.bibliographyCslStyle.desc')}
-      >
-        <input
-          onChange={(e) => updateSetting('bibliographyCslStyle', (e.target as HTMLInputElement).value)}
-          type="text"
-          spellCheck={false}
-          placeholder={t('settings.citation.bibliographyCslStyle.placeholder')}
-          defaultValue={settings.bibliographyCslStyle || settings.cslStyle || ''}
-        />
-      </SettingItem>
-
       {/* v6.7 参考文献区块标题 */}
       <SettingItem
         name={t('settings.citation.bibliographyHeading')}
