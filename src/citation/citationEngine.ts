@@ -9,6 +9,7 @@ import { getBibFromCiteKey, getBibFromCiteKeys, getItemJSONFromCiteKeys } from '
 import type { CiteKey } from '../bbt/cayw';
 import type { DatabaseWithPort } from '../types';
 import type { CitationCacheEntry, CitationData, CitationFormat, DocumentScanResult } from './citationTypes';
+import { requestUrl } from 'obsidian';
 
 /** 5 分钟缓存有效期 */
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -44,6 +45,29 @@ function extractCitationFormat(cslXml: string): CitationFormat {
 	return { prefix, suffix, delimiter, superscript };
 }
 
+/**
+ * v6.2 从 Zotero 条目 JSON 中鲁棒提取 URL 和 DOI。
+ *
+ * 优先级链：
+ *   1. item.url / item.URL
+ *   2. item.extra 字段中的 URL: ... 行
+ *   3. item.DOI / item.doi → 拼接 https://doi.org/${doi}
+ *   4. item.extra 中的 DOI: ... 行 → 拼接
+ */
+function extractUrl(item: any): { url?: string; doi?: string } {
+	const url =
+		item.url || item.URL ||
+		(item.extra && item.extra.match(/^URL:\s*(\S+)/m)?.[1]) ||
+		undefined;
+
+	const doi =
+		item.DOI || item.doi ||
+		(item.extra && item.extra.match(/^DOI:\s*(\S+)/im)?.[1]) ||
+		undefined;
+
+	return { url, doi };
+}
+
 export class CitationEngine {
 	private plugin: ZoteroConnector;
 	private cache = new Map<string, CitationCacheEntry>();
@@ -56,6 +80,12 @@ export class CitationEngine {
 	private individualBibHtmlCache = new Map<string, string>();
 	/** 逐篇元数据缓存（DOI、URL）— 独立于 batch fetch 的 formattedHtml */
 	private individualMetaCache = new Map<string, { doi?: string; url?: string }>();
+	/** 合并参考文献 HTML 缓存（供 bibliography widget 渲染） */
+	private combinedBibCache = new Map<string, string>();
+	/** v6.8: CSL XML 缓存（抓取自 inlineCslStyle URL），供 extractCitationFormat 解析 */
+	private _cachedCslXml: string | null = null;
+	/** 记录缓存 CSL XML 对应的样式标识符，用于 invalidation 判断 */
+	private _cachedCslStyle: string = '';
 
 	constructor(plugin: ZoteroConnector) {
 		this.plugin = plugin;
@@ -65,7 +95,13 @@ export class CitationEngine {
 	getNumber(key: string): number {
 		return this.currentKeyToNumber.get(key) || 0;
 	}
-
+		/**
+		 * v6.5 从 cm6LivePreview 同步 key→number 映射。
+		 * 由 CitationPluginValue.compute() 调用。
+		 */
+		syncKeyToNumber(map: Map<string, number>): void {
+			this.currentKeyToNumber = map;
+		}
 	/** 获取 inline CSL 样式（兼容旧 settings.cslStyle） */
 	private get inlineCsl(): string | undefined {
 		return this.plugin.settings.inlineCslStyle || this.plugin.settings.cslStyle || undefined;
@@ -95,8 +131,62 @@ export class CitationEngine {
 			return this._cachedFormat;
 		}
 		this._cachedFormatStyle = style;
-		this._cachedFormat = extractCitationFormat(style);
+		// v6.8: 优先使用抓取到的 CSL XML；若未就绪则回退到 style 标识符
+		const xml = this._cachedCslXml || style;
+		this._cachedFormat = extractCitationFormat(xml);
 		return this._cachedFormat;
+	}
+
+	/**
+	 * v6.8 抓取并缓存 inline CSL 样式 XML。
+	 *
+	 * 从 inlineCslStyle 设置项（URL 或样式名称）异步加载 CSL XML，
+	 * 缓存后供 getCitationFormat() 同步解析。
+	 *
+	 * 调用时机：插件初始化、CSL 样式设置变更。
+	 */
+	async refreshCslXml(): Promise<void> {
+		const style = this.inlineCsl;
+		if (!style) {
+			this._cachedCslXml = null;
+			this._cachedCslStyle = '';
+			return;
+		}
+
+		// 若已缓存且样式未变，跳过
+		if (this._cachedCslXml && this._cachedCslStyle === style) return;
+
+		this._cachedCslStyle = style;
+
+		// 构造 CSL 文件 URL
+		let url: string;
+		if (/^https?:\/\//i.test(style)) {
+			url = style;
+		} else {
+			// 样式名自动补全
+			const name = style.replace(/\.csl$/i, '');
+			url = `https://www.zotero.org/styles/${name}`;
+		}
+
+		try {
+			const resp = await requestUrl({ url, method: 'GET' });
+			if (resp.status === 200 && resp.text) {
+				this._cachedCslXml = resp.text;
+				// 清空旧的 CitationFormat 缓存，下次调用 getCitationFormat() 重新解析
+				this._cachedFormat = null;
+			}
+		} catch (e) {
+			console.warn('[CitationEngine] Failed to fetch CSL XML from:', url, e);
+			// 保留旧缓存，下次重试
+		}
+	}
+
+	/** v6.8 强制清除 CSL XML 缓存（供 invalidateCache 调用） */
+	private invalidateCslXml(): void {
+		this._cachedCslXml = null;
+		this._cachedCslStyle = '';
+		this._cachedFormat = null;
+		this._cachedFormatStyle = undefined;
 	}
 
 	/**
@@ -328,10 +418,7 @@ export class CitationEngine {
 			const raw = await getItemJSONFromCiteKeys([citeKey], database, 1, true);
 			const items: any[] = Array.isArray(raw) ? raw : [];
 			const item = items[0] || {};
-			const meta = {
-				doi: item.DOI || item.doi || undefined,
-				url: item.url || undefined,
-			};
+			const meta = extractUrl(item);
 			this.individualMetaCache.set(key, meta);
 			return meta;
 		} catch {
@@ -395,10 +482,7 @@ export class CitationEngine {
 					for (let i = 0; i < uncachedMeta.length; i++) {
 						const key = uncachedMeta[i];
 						const item = items[i] || {};
-						this.individualMetaCache.set(key, {
-							doi: item.DOI || item.doi || undefined,
-							url: item.url || undefined,
-						});
+						this.individualMetaCache.set(key, extractUrl(item));
 					}
 				} catch {
 					for (const key of uncachedMeta) {
@@ -409,15 +493,54 @@ export class CitationEngine {
 				}
 			}
 		})().catch(() => {}); // 静默处理所有异常
-	}
+		}
 
-	/** 清除所有缓存（CSL 样式或数据库变更时调用） */
-	invalidateCache(): void {
+		// ── v6.4 合并参考文献 HTML（供 bibliography widget）──
+
+		/** 同步读取合并参考文献 HTML 缓存 */
+		getCombinedBibliographyCached(keys: string[]): string | undefined {
+			const cacheKey = [...keys].sort().join(',');
+			return this.combinedBibCache.get(cacheKey);
+		}
+
+		/**
+		 * v6.4 异步获取一组 citekey 的合并参考文献 HTML。
+		 * 使用 bibliography CSL 样式，返回全部条目拼接的 HTML。
+		 * 结果缓存于 combinedBibCache。
+		 */
+		async getCombinedBibliographyHtml(keys: string[]): Promise<string> {
+			if (keys.length === 0) return '';
+			const cacheKey = [...keys].sort().join(',');
+			const cached = this.combinedBibCache.get(cacheKey);
+			if (cached !== undefined) return cached;
+			const database: DatabaseWithPort = {
+				database: this.plugin.settings.database,
+				port: (this.plugin.settings as any).port,
+			};
+			const citeKeyObjs: CiteKey[] = keys.map(k => ({ key: k, library: 1 }));
+			const bibCsl = this.bibliographyCsl;
+			try {
+				const html = await getBibFromCiteKeys(citeKeyObjs, database, bibCsl, 'html', true);
+				// 清洗 CSL 残留内联样式
+				const cleaned = (html || '')
+					.replace(/color\s*:\s*[^;>"]+[;>"]?\s*/gi, '')
+					.replace(/opacity\s*:\s*[^;>"]+[;>"]?\s*/gi, '');
+				this.combinedBibCache.set(cacheKey, cleaned);
+				return cleaned;
+			} catch {
+				const fallback = '';
+				this.combinedBibCache.set(cacheKey, fallback);
+				return fallback;
+			}
+		}
+
+		/** 清除所有缓存（CSL 样式或数据库变更时调用） */
+		invalidateCache(): void {
 		this.cache.clear();
 		this.individualBibHtmlCache.clear();
 		this.individualMetaCache.clear();
-		this._cachedFormat = null;
-		this._cachedFormatStyle = undefined;
+		this.combinedBibCache.clear();
+		this.invalidateCslXml();
 	}
 
 	/** 查询缓存中的单个 citekey */

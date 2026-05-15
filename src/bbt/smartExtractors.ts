@@ -52,17 +52,17 @@ function extractAuthorsSmart(item: any): string[] {
   const firstAuthor = creatorFullName(creators[0]);
 
   if (creators.length === 1) {
-    return [`${firstAuthor} \u2020 \u2709\uFE0E`];
+    return [`${firstAuthor} \u2021 \u2709\uFE0E`];
   }
 
   const lastCreator = creators[creators.length - 1];
   const corresponding = creatorFullName(lastCreator);
 
   if (creators.length === 2) {
-    return [`${firstAuthor} \u2020`, `${corresponding} \u2709\uFE0E`];
+    return [`${firstAuthor} \u2021`, `${corresponding} \u2709\uFE0E`];
   }
 
-  return [`${firstAuthor} \u2020`, `${corresponding} \u2709\uFE0E`, 'et al.'];
+  return [`${firstAuthor} \u2021`, `${corresponding} \u2709\uFE0E`, 'et al.'];
 }
 
 function extractYear(item: any): string {

@@ -379,15 +379,20 @@
     to   { opacity: 1; transform: translateY(0); }
 }
 
-/* 弹窗内参考文献条目 */
-.citation-popover .csl-entry {
-    margin-bottom: 8px;
+/* 弹窗内参考文献条目 — v6.2 强力压实 CSL 自带留白 */
+.citation-popover .csl-entry,
+.citation-popover .csl-bib-body {
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1.4;
     font-size: 13px;
-    line-height: 1.5;
 }
-
-.citation-popover .csl-entry:last-child {
-    margin-bottom: 0;
+.citation-popover .csl-left-margin {
+    margin-right: 0.5em !important;
+}
+.citation-popover .csl-entry:last-child,
+.citation-popover .csl-bib-body:last-child {
+    margin-bottom: 0 !important;
 }
 
 /* 弹窗操作按钮 */
@@ -434,4 +439,34 @@
 .csl-entry,
 .csl-entry * {
     color: var(--text-normal) !important;
+}
+
+/* ── v6.3 引注编辑模态框 ── */
+.citation-edit-modal {
+    max-width: 520px;
+    min-width: 380px;
+}
+
+.citation-edit-modal .citation-edit-chips {
+    transition: min-height 0.15s ease;
+}
+
+.citation-edit-modal .citation-edit-chip {
+    transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+.citation-edit-modal .citation-edit-chip:hover {
+    transform: translateY(-1px);
+}
+
+.citation-edit-modal button {
+    transition: background 0.15s ease, transform 0.1s ease, opacity 0.1s ease;
+}
+
+.citation-edit-modal button:hover {
+    transform: translateY(-1px);
+}
+
+.citation-edit-modal button:active {
+    transform: scale(0.97);
 }

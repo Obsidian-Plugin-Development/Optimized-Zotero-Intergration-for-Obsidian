@@ -454,7 +454,6 @@ export class SyncFloatingButton {
       menuCommands.push('zdc-smart-sync');
     }
     menuCommands.push('zdc-insert-inline-citation');
-    menuCommands.push('zdc-generate-bibliography');
 
     if (menuCommands.length === 0) return;
 
@@ -471,7 +470,6 @@ export class SyncFloatingButton {
     const keyMap: Record<string, string> = {
       'zdc-smart-sync': 'command.smartSync',
       'zdc-insert-inline-citation': 'command.insertInlineCitation',
-      'zdc-generate-bibliography': 'command.generateBibliography',
     };
     return t(keyMap[cmdId] || cmdId);
   }

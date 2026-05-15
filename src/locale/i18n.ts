@@ -330,6 +330,9 @@ const en: StringMap = {
   'settings.citation.bibliographyCslStyle.desc':
     'CSL style for bibliography formatting in popovers and reference lists.',
   'settings.citation.bibliographyCslStyle.placeholder': 'e.g. gb-t-7714-2015',
+  'settings.citation.bibliographyHeading': 'Bibliography Heading',
+  'settings.citation.bibliographyHeading.desc':
+    'Native Markdown heading for locating and auto-generating the bibliography section (omit the #).',
 
   // ── v6.0 Citation Rendering ──
   'settings.citation.renderingEnabled': 'Enable Citation Rendering',
@@ -687,6 +690,9 @@ const zhCN: StringMap = {
   'settings.citation.bibliographyCslStyle.desc':
     '用于悬浮弹窗和文末参考文献格式化的 CSL 样式。',
   'settings.citation.bibliographyCslStyle.placeholder': '例如：gb-t-7714-2015',
+  'settings.citation.bibliographyHeading': '参考文献区块标题',
+  'settings.citation.bibliographyHeading.desc':
+    '用于自动定位和生成文末参考文献的原生 Markdown 标题名称（无需输入 # 号）。',
 
   // ── v6.0 Citation Rendering ──
   'settings.citation.renderingEnabled': '启用引注渲染',

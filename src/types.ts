@@ -158,6 +158,8 @@ export interface ZoteroConnectorSettings {
   cslStyle?: string;
   /** v6.0: 启用引注渲染（Live Preview + Reading Mode）。默认 true。 */
   citationRenderingEnabled?: boolean;
+  /** v6.7: 文末参考文献定位标题（不含 #）。默认 "参考文献"。 */
+  bibliographyHeading?: string;
   /** v5.2: 开卷自动同步 — 打开匹配触发条件的笔记时静默执行同步 */
   autoSyncOnOpen?: boolean;
   bodyTemplate?: string;

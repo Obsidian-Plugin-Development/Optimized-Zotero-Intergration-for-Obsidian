@@ -15,6 +15,7 @@ import {
   injectTitleMarqueeStyles,
 } from '../bbt/styleManager';
 import { SMART_FIELD_OPTIONS } from '../bbt/smartExtractors';
+import { setBibliographyHeading } from '../citation/bibliographyWriter';
 import { getZoteroMappings, getCustomProperties } from '../bbt/helpers';
 import {
   ExportFormat,
@@ -402,6 +403,24 @@ function CitationTab({
           spellCheck={false}
           placeholder={t('settings.citation.bibliographyCslStyle.placeholder')}
           defaultValue={settings.bibliographyCslStyle || settings.cslStyle || ''}
+        />
+      </SettingItem>
+
+      {/* v6.7 参考文献区块标题 */}
+      <SettingItem
+        name={t('settings.citation.bibliographyHeading')}
+        description={t('settings.citation.bibliographyHeading.desc')}
+      >
+        <input
+          onChange={(e) => {
+            const val = (e.target as HTMLInputElement).value;
+            updateSetting('bibliographyHeading', val);
+            setBibliographyHeading(val || '参考文献');
+          }}
+          type="text"
+          spellCheck={false}
+          placeholder="参考文献"
+          defaultValue={settings.bibliographyHeading || '参考文献'}
         />
       </SettingItem>
     </div>

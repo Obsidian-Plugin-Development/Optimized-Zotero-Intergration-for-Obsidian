@@ -1,13 +1,14 @@
 /**
- * v6.1 CodeMirror 6 ViewPlugin — Live Preview 引注实时渲染
+ * v6.5 CodeMirror 6 ViewPlugin — Live Preview 引注实时渲染
  *
  * 使用 ViewPlugin.fromClass 创建装饰插件。
  * 当光标不在引用行时，隐藏 [@citekey] 原始文本，
- * 原地渲染格式化行内引注编号（如 [1]、[1,2]）。
+ * 原地渲染极简行内引注标记（如 [1]、[4-6]、上标 1-3）。
  *
  * engine/plugin 通过模块级闭包注入。
  * 智能拦截：仅当变更涉及 [、]、@ 字符才触发全量重扫。
- * Widget 构造时冻结 displayText，eq() 比较冻结值，根除 CM6 复用陷阱。
+ *
+ * v6.5: 移除 StateField 依赖，改为直接扫描文档 + citationStore 共享。
  */
 import {
 	Decoration,
@@ -23,10 +24,19 @@ import type { Extension } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
+import { updateCitationStore } from './citationStore';
+import type { CitationStore, CitePos } from './citationStore';
+import { scheduleBibliographyUpdate } from './bibliographyWriter';
 
 // ── 模块级闭包引用 ──
 let _engine: CitationEngine;
 let _plugin: ZoteroConnector;
+let _activeView: EditorView | null = null;
+
+/** 提供给 hoverPopover 获取当前活跃 EditorView（用于编辑模态框） */
+export function getActiveEditorView(): EditorView | null {
+	return _activeView;
+}
 
 // ── 调试开关 ──
 const DEBUG_CITATION_BOUNDARY = false;
@@ -38,18 +48,6 @@ function debugLog(msg: string, ...args: any[]) {
 
 // ── 光标/选区重叠检测 ──
 
-/**
- * 判断任意光标或选区是否与引注范围 [from, to) 重叠。
- *
- * 光标紧贴边缘（from 或 to）时判定为重叠 → 卸载装饰 → 暴露裸文，
- * 确保边界输入绝对安全。
- *
- * | 光标位置           | sel.from | sel.to | from≤to | to≥from | 结果        |
- * |--------------------|----------|--------|---------|---------|-------------|
- * | `|[@citekey]`      | from     | from   | T       | T       | 重叠 → 裸文 |
- * | `[@citekey]|`      | to       | to     | T       | T       | 重叠 → 裸文 |
- * | `|` 前一个字符      | from-1   | from-1 | T       | F       | → widget    |
- */
 function isCursorOverlapping(state: EditorState, from: number, to: number): boolean {
 	for (const sel of state.selection.ranges) {
 		if (sel.from <= to && sel.to >= from) return true;
@@ -82,56 +80,81 @@ function isInsideCodeBlock(state: EditorState, pos: number): boolean {
 	return false;
 }
 
-// ── Widget：构造时冻结显示文本，根除 eq() 复用陷阱 ──
+// ── 本地智能序号折叠算法 ──
+
+function foldNumbers(sortedUnique: number[]): string {
+	if (sortedUnique.length === 0) return '';
+	const parts: string[] = [];
+	let runStart = sortedUnique[0];
+	let runEnd = sortedUnique[0];
+
+	for (let i = 1; i < sortedUnique.length; i++) {
+		if (sortedUnique[i] === runEnd + 1) {
+			runEnd = sortedUnique[i];
+		} else {
+			parts.push(runStart === runEnd ? `${runStart}` : `${runStart}-${runEnd}`);
+			runStart = sortedUnique[i];
+			runEnd = sortedUnique[i];
+		}
+	}
+	parts.push(runStart === runEnd ? `${runStart}` : `${runStart}-${runEnd}`);
+	return parts.join(', ');
+}
+
+function computeInlineHtml(keys: string[]): string {
+	const numbers: number[] = [];
+	for (const k of keys) {
+		const num = _engine.getNumber(k);
+		if (num > 0) numbers.push(num);
+	}
+	if (numbers.length === 0) return '';
+
+	const sortedUnique = [...new Set(numbers)].sort((a, b) => a - b);
+	const folded = foldNumbers(sortedUnique);
+	const fmt = _engine.getCitationFormat();
+
+	if (fmt.superscript) {
+		return `<sup>${folded}</sup>`;
+	}
+	return fmt.prefix + folded + fmt.suffix;
+}
+
+// ── Widget ──
 
 class InlineCitationWidget extends WidgetType {
-	/**
-	 * @param keys        原始 citekey 列表（如 ["doe2020"]）
-	 * @param displayText 构造时冻结的渲染文本（如 "[1]"、"(2)"）。
-	 *                    绝不在此类中调用 _engine.getNumber() ——
-	 *                    那会读取 mutable 全局状态，导致 eq() 误判。
-	 * @param superscript 是否为上标格式
-	 */
 	constructor(
 		private readonly keys: string[],
-		private readonly displayText: string,
-		private readonly superscript: boolean,
+		private readonly displayHtml: string,
+		private readonly from: number,
+		private readonly to: number,
 	) {
 		super();
 	}
 
-	toDOM(_view: EditorView): HTMLElement {
+	toDOM(view: EditorView): HTMLElement {
+		_activeView = view;
+
 		const span = document.createElement('span');
 		span.addClass('custom-citation-inline');
 
-		if (!this.displayText) {
+		if (!this.displayHtml) {
 			span.setText('[?]');
 			span.style.opacity = '0.5';
-		} else if (this.superscript) {
-			const sup = document.createElement('sup');
-			sup.setText(this.displayText);
-			span.appendChild(sup);
 		} else {
-			span.setText(this.displayText);
+			span.innerHTML = this.displayHtml;
 		}
 
 		span.setAttribute('data-citation-keys', this.keys.join(','));
+		span.setAttribute('data-citation-from', String(this.from));
+		span.setAttribute('data-citation-to', String(this.to));
 		return span;
 	}
 
-	/**
-	 * 关键修复：对比构造时冻结的 displayText，而非实时查询引擎。
-	 *
-	 * 旧 Bug：eq() 中调用 getDisplayText() → _engine.getNumber(k)
-	 *   → 读取 mutable 全局 Map。compute() 已更新 Map 后，新旧 Widget
-	 *   读到相同（新）值 → eq() 返回 true → CM6 复用旧 DOM → 序号不更新。
-	 *
-	 * 修复后：displayText 在构造函数中冻结，eq() 比较冻结值。
-	 *   拖拽/粘贴改变顺序 → 新旧 displayText 不同 → eq() false → toDOM() 重建。
-	 */
 	eq(other: InlineCitationWidget): boolean {
 		return this.keys.join(',') === other.keys.join(',')
-			&& this.displayText === other.displayText;
+			&& this.displayHtml === other.displayHtml
+			&& this.from === other.from
+			&& this.to === other.to;
 	}
 
 	ignoreEvent(): boolean {
@@ -139,18 +162,25 @@ class InlineCitationWidget extends WidgetType {
 	}
 }
 
-// ── 辅助：计算单个引注的渲染文本 ──
+// ── 文档扫描（内联，不依赖 StateField）──
 
-function computeDisplayText(keys: string[]): string {
-	const numbers: number[] = [];
-	for (const k of keys) {
-		const num = _engine.getNumber(k);
-		if (num > 0) numbers.push(num);
+const CITE_PATTERN = /\[@([^\]]+)\]/g;
+
+function scanDocumentForCitations(docText: string): CitePos[] {
+	const positions: CitePos[] = [];
+	let match: RegExpExecArray | null;
+	while ((match = CITE_PATTERN.exec(docText)) !== null) {
+		const rawKeys = match[1]
+			.split(';')
+			.map(s => s.trim().replace(/^@/, ''))
+			.filter(Boolean);
+		positions.push({
+			keys: rawKeys,
+			from: match.index,
+			to: match.index + match[0].length,
+		});
 	}
-	if (numbers.length === 0) return '';
-	const fmt = _engine.getCitationFormat();
-	const unique = [...new Set(numbers)].sort((a, b) => a - b);
-	return fmt.prefix + unique.join(fmt.delimiter) + fmt.suffix;
+	return positions;
 }
 
 // ── ViewPlugin ──
@@ -163,29 +193,20 @@ class CitationPluginValue implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		// 智能拦截 (Smart Trigger)：仅当变更涉及 [、]、@ 字符
-		// 才触发全量重扫。普通文本输入由 CM6 自动映射装饰位置。
 		const citationAffected = update.docChanged && this.changeAffectsCitations(update);
 		if (citationAffected || update.viewportChanged || update.selectionSet) {
 			this.decorations = this.compute();
 		}
 	}
 
-	/**
-	 * 检查 Transaction 变更是否涉及引注关键字符 [ ] @。
-	 * 仅遍历已变更的范围 (iterChanges)，O(变更大小)，不扫描全文。
-	 * 同时检查插入文本和删除文本，覆盖新增/删除/拖拽/粘贴所有场景。
-	 */
 	private changeAffectsCitations(update: ViewUpdate): boolean {
 		let affects = false;
 		update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
 			if (affects) return;
-			// 插入的文本包含 [ ] @
 			if (/[[\]@]/.test(inserted.toString())) {
 				affects = true;
 				return;
 			}
-			// 删除的文本包含 [ ] @（如删除引注、拖拽移走引注）
 			if (fromA < toA) {
 				const deleted = update.startState.doc.sliceString(fromA, toA);
 				if (/[[\]@]/.test(deleted)) {
@@ -196,13 +217,11 @@ class CitationPluginValue implements PluginValue {
 		return affects;
 	}
 
-	destroy() {
-		// 无异步资源需清理
-	}
+	destroy() {}
 
 	/**
-	 * 构建当前文档的引注装饰集。
-	 * 跳过代码块、光标行。仅装饰当前 viewport 内可见的引注。
+	 * v6.5 直接扫描文档 + 更新 citationStore + engine。
+	 * 替代原来的 StateField 读取方案。
 	 */
 	private compute(): DecorationSet {
 		if (!_plugin?.settings.citationRenderingEnabled) {
@@ -211,43 +230,40 @@ class CitationPluginValue implements PluginValue {
 
 		const { state } = this.view;
 		const docText = state.doc.toString();
-		const scan = _engine.scanDocument(docText);
 
-		if (scan.positions.length === 0) {
-			debugLog('compute: no citekey positions found');
+		// ★ 扫描文档并更新全局 Store（替代 StateField）
+		const store = updateCitationStore(docText);
+
+		// ★ 同步 engine 的 keyToNumber
+		_engine.syncKeyToNumber(store.keyToNumber);
+
+		// ★ 触发后台预缓存（单篇 + 合并参考文献）
+		if (store.sortedUniqueKeys.length > 0) {
+			_engine.precacheAllBibs(store.sortedUniqueKeys);
+			// 同时预热合并参考文献缓存（供 bibliographyWriter 同步读取，fire-and-forget）
+			_engine.getCombinedBibliographyHtml(store.sortedUniqueKeys);
+		}
+
+		// ★ 触发文末参考文献纯文本同步（v6.6 替代 Widget 渲染）
+		scheduleBibliographyUpdate(this.view);
+
+		const positions = scanDocumentForCitations(docText);
+		if (positions.length === 0) {
 			return Decoration.none;
 		}
 
-		debugLog(`compute: doc ${docText.length} chars, ${scan.positions.length} positions`);
-
 		const visibleRanges = this.view.visibleRanges;
-		const superscript = _engine.getCitationFormat().superscript;
-		const ranges: Array<{ from: number; to: number; keys: string[]; displayText: string }> = [];
+		const ranges: Array<{ from: number; to: number; keys: string[]; displayHtml: string }> = [];
 		const unresolvedKeys = new Set<string>();
-		let skippedCodeBlock = 0;
-		let skippedCursor = 0;
-		let skippedViewport = 0;
 
-		for (const pos of scan.positions) {
-			if (isInsideCodeBlock(state, pos.from)) {
-				skippedCodeBlock++;
-				continue;
-			}
+		for (const pos of positions) {
+			if (isInsideCodeBlock(state, pos.from)) continue;
+			if (isCursorOverlapping(state, pos.from, pos.to)) continue;
 
-			// 光标/选区与引注重叠 → 暴露原始 [@citekey] 供编辑
-			if (isCursorOverlapping(state, pos.from, pos.to)) {
-				skippedCursor++;
-				continue;
-			}
-
-			// 视口过滤：仅为可见引注生成 Decoration
 			const isVisible = visibleRanges.some(r =>
 				pos.from <= r.to && pos.to >= r.from
 			);
-			if (!isVisible) {
-				skippedViewport++;
-				continue;
-			}
+			if (!isVisible) continue;
 
 			for (const k of pos.keys) {
 				if (!_engine.getCached(k)) {
@@ -255,14 +271,10 @@ class CitationPluginValue implements PluginValue {
 				}
 			}
 
-			// ★ 构造时冻结 displayText — 确保 eq() 比较稳定值
-			const displayText = computeDisplayText(pos.keys);
-			ranges.push({ from: pos.from, to: pos.to, keys: pos.keys, displayText });
+			const displayHtml = computeInlineHtml(pos.keys);
+			ranges.push({ from: pos.from, to: pos.to, keys: pos.keys, displayHtml });
 		}
 
-		debugLog(`  ranges=${ranges.length} skipped(code=${skippedCodeBlock} cursor=${skippedCursor} vp=${skippedViewport})`);
-
-		// 异步解析未缓存的 citekey
 		if (unresolvedKeys.size > 0) {
 			_engine.resolveCiteKeys([...unresolvedKeys]).then(() => {
 				this.decorations = this.compute();
@@ -270,22 +282,9 @@ class CitationPluginValue implements PluginValue {
 			});
 		}
 
-		// ★ v6.2 后台静默预缓存：文档扫描后立即拉取所有 citekey 的
-		//   单篇参考文献 HTML + 元数据，确保 hover popover 零延迟直读。
-		const allUniqueKeys = new Set<string>();
-		for (const pos of scan.positions) {
-			for (const k of (pos as any).keys) {
-				allUniqueKeys.add(k);
-			}
-		}
-		if (allUniqueKeys.size > 0) {
-			_engine.precacheAllBibs([...allUniqueKeys]);
-		}
-
-		// 构建 Decoration.replace — 双重保险边界
-		const decos = ranges.map(({ from, to, keys, displayText }) =>
+		const decos = ranges.map(({ from, to, keys, displayHtml }) =>
 			Decoration.replace({
-				widget: new InlineCitationWidget(keys, displayText, superscript),
+				widget: new InlineCitationWidget(keys, displayHtml, from, to),
 				inclusiveStart: false,
 				inclusiveEnd: false,
 				block: false,
@@ -294,6 +293,7 @@ class CitationPluginValue implements PluginValue {
 
 		return decos.length > 0 ? Decoration.set(decos, true) : Decoration.none;
 	}
+
 }
 
 // ── Factory ──

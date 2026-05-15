@@ -21,6 +21,8 @@ import { CitationEngine } from './citation/citationEngine';
 import { citationLivePreviewPlugin } from './citation/cm6LivePreview';
 import { createCitationPostProcessor } from './citation/readingMode';
 import { CitationPopoverManager } from './citation/hoverPopover';
+import { initBibliographyWriter, setBibliographyHeading, hasBibHeading } from './citation/bibliographyWriter';
+
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
 import {
@@ -63,6 +65,7 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   bibliographyCslStyle: '',
   cslStyle: '',
   citationRenderingEnabled: true,
+  bibliographyHeading: '参考文献',
   autoSyncOnOpen: false,
   bodyTemplate: '## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}',
   openNoteAfterImport: false,
@@ -117,8 +120,9 @@ export default class ZoteroConnector extends Plugin {
         this.settings.titleMarqueeEnabled || false,
         this.settings.titleMarqueeDuration || 15
       );
-      // CSL 样式变更时清除引注缓存
+      // CSL 样式变更时清除引注缓存并刷新 CSL XML
       this.citationEngine?.invalidateCache();
+      this.citationEngine?.refreshCslXml();
     });
 
     this.updatePDFUtility();
@@ -133,7 +137,13 @@ export default class ZoteroConnector extends Plugin {
     const ext = citationLivePreviewPlugin(this.citationEngine, this);
     // registerEditorExtension 在 Obsidian >=0.15.0 可用；旧版类型定义未声明此方法
     if (typeof (this as any).registerEditorExtension === 'function') {
-      (this as any).registerEditorExtension(ext);
+      ;(this as any).registerEditorExtension(ext);
+
+	    // v6.7: 初始化纯文本参考文献同步引擎
+	    initBibliographyWriter(this.citationEngine, this.settings.bibliographyHeading || '参考文献');
+
+	    // v6.4: 状态栏指示器 — 提示 bibliography 锚点状态
+	    this.addBibliographyStatusBar();
     } else {
       console.warn('[Zotero Plugin] registerEditorExtension not available — Live Preview citation rendering disabled');
     }
@@ -190,7 +200,7 @@ export default class ZoteroConnector extends Plugin {
         try {
           const citeKeys = await getCiteKeys(database);
           if (!citeKeys.length) return;
-          const refs = citeKeys.map((k) => `[@${k.key}]`).join('; ');
+			const refs = `[@${citeKeys.map((k) => k.key).join("; @")}]`;
           editor.replaceSelection(refs);
           new Notice(t('notice.inlineCitationInserted'), 3000);
         } catch (e) {
@@ -203,15 +213,7 @@ export default class ZoteroConnector extends Plugin {
     });
 
     // 命令 B：扫描 [@citekey] 引用，批量生成/更新参考文献列表
-    this.addCommand({
-      id: 'zdc-generate-bibliography',
-      name: t('command.generateBibliography'),
-      editorCallback: async (editor) => {
-        await this.generateBibliographyForEditor(editor);
-      },
-    });
-
-    // ── v4.0 保留命令 ──
+// ── v4.0 保留命令 ──
 
     this.addCommand({
       id: 'zdc-insert-notes',
@@ -335,88 +337,6 @@ export default class ZoteroConnector extends Plugin {
 
   /**
    * v6.0 文末参考文献生成器：扫描 [@citekey] 引用 → 调用 Zotero BBT 批量格式化 → 写入「## 参考文献」区域。
-   * @param silent 为 true 时不弹出 Notice（由调用方自行处理通知）
-   */
-  async generateBibliographyForEditor(editor: Editor, silent = false): Promise<void> {
-    const database = {
-      database: this.settings.database,
-      port: this.settings.port,
-    };
-
-    // 扫描文档中所有 [@citekey] 引用
-    const docText = editor.getValue();
-    const citeKeyPattern = /\[@([^\]]+)\]/g;
-    const seenKeys = new Set<string>();
-    let match;
-    while ((match = citeKeyPattern.exec(docText)) !== null) {
-      // 支持多引用 [@key1; @key2]
-      const keys = match[1].split(';').map((s) => s.trim().replace(/^@/, ''));
-      for (const k of keys) {
-        if (k) seenKeys.add(k);
-      }
-    }
-
-    if (seenKeys.size === 0) {
-      if (!silent) new Notice(t('notice.noCiteKeysFound'), 4000);
-      return;
-    }
-
-    const citeKeyObjs: CiteKeyExport[] = Array.from(seenKeys).map((key) => ({
-      key,
-      library: 1,
-      citekey: key,
-      title: '',
-    }));
-
-    const bib = await getBibFromCiteKeys(
-      citeKeyObjs as any,
-      database,
-      this.settings.bibliographyCslStyle || this.settings.cslStyle || undefined
-    );
-    if (!bib) {
-      if (!silent) new Notice(t('notice.emptyBib'), 5000);
-      return;
-    }
-
-    let markdownBib = htmlToMarkdown(bib);
-    // 将编号条目拆分为独立行（匹配「. 」后紧跟「N. 」的条目边界）
-    markdownBib = markdownBib.replace(/([.)])\s+(?=\d+\.\s)/g, '$1\n');
-    // v6.1 清除 CSL 残留的内联颜色样式（BBT 可能输出灰色文本）
-    markdownBib = markdownBib.replace(/color\s*:\s*[^;>]+[;>]?\s*/gi, '');
-    markdownBib = markdownBib.replace(/opacity\s*:\s*[^;>]+[;>]?\s*/gi, '');
-
-    // 查找或创建 ## 参考文献 标题
-    const headingPattern = /^## 参考文献\s*$/m;
-    const existingMatch = headingPattern.exec(docText);
-
-    if (existingMatch) {
-      // 替换已有参考文献区域（使用 replaceRange 保留光标和撤销历史）
-      const headingIndex = existingMatch.index;
-      const afterHeading = docText.indexOf('\n', headingIndex);
-      const nextHeadingIndex = docText.slice(afterHeading + 1).search(/^## /m);
-      const endIndex = nextHeadingIndex >= 0
-        ? afterHeading + 1 + nextHeadingIndex
-        : docText.length;
-
-      // 使用 from/to offset 方式
-      const fromPos = editor.offsetToPos(afterHeading + 1);
-      const toPos = editor.offsetToPos(endIndex);
-      editor.replaceRange('\n\n' + markdownBib + '\n', fromPos, toPos);
-    } else {
-      // 追加到文档末尾
-      const lastLine = editor.lastLine();
-      const lastCh = editor.getLine(lastLine).length;
-      const endPos = { line: lastLine, ch: lastCh };
-      editor.replaceRange('\n\n## 参考文献\n\n' + markdownBib + '\n', endPos, endPos);
-    }
-
-    if (!silent) {
-      new Notice(
-        t('notice.bibliographyGenerated', String(seenKeys.size)),
-        3000
-      );
-    }
-  }
 
   removeExportCommand(format: ExportFormat) {
     (this.app as any).commands.removeCommand(
@@ -645,6 +565,70 @@ export default class ZoteroConnector extends Plugin {
       }
 
       modal.close();
+    }
+  }
+
+  // ── v6.4 Bibliography Anchor Status Bar ──
+
+  private bibStatusBarItem: HTMLElement | null = null;
+
+  private addBibliographyStatusBar() {
+    this.bibStatusBarItem = this.addStatusBarItem();
+    this.bibStatusBarItem.addClass('citation-bib-status');
+    this.bibStatusBarItem.style.cssText =
+      'cursor: pointer; font-size: 12px; color: var(--text-muted);';
+    this.bibStatusBarItem.setText('');
+
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', () => this.updateBibStatusBar())
+    );
+    this.updateBibStatusBar();
+  }
+
+  private removeBibliographyStatusBar() {
+    this.bibStatusBarItem?.remove();
+    this.bibStatusBarItem = null;
+  }
+
+  private updateBibStatusBar() {
+    if (!this.bibStatusBarItem) return;
+
+    const view = this.app.workspace.getActiveViewOfType(EditableFileView);
+    if (!view?.editor) {
+      this.bibStatusBarItem.setText('');
+      return;
+    }
+
+    try {
+      const docText = (view.editor as any).getValue?.() || '';
+      const hasCitations = /\[@([^\]]+)\]/.test(docText);
+      const hasBibAnchor = hasBibHeading(docText);
+
+      if (hasCitations && !hasBibAnchor) {
+        this.bibStatusBarItem.setText('Bibliography: add ## 参考文献 heading');
+        this.bibStatusBarItem.style.color = 'var(--text-warning)';
+        this.bibStatusBarItem.onclick = () => this.insertBibliographyAnchor();
+      } else if (hasCitations && hasBibAnchor) {
+        this.bibStatusBarItem.setText('Bibliography: synced');
+        this.bibStatusBarItem.style.color = 'var(--text-success)';
+        this.bibStatusBarItem.onclick = null;
+      } else {
+        this.bibStatusBarItem.setText('');
+        this.bibStatusBarItem.onclick = null;
+      }
+    } catch {
+      this.bibStatusBarItem.setText('');
+    }
+  }
+
+  private insertBibliographyAnchor() {
+    const view = this.app.workspace.getActiveViewOfType(EditableFileView);
+    if (!view?.editor) return;
+
+    const editor = view.editor as any;
+    const cursor = editor.getCursor?.('to') || editor.getCursor?.();
+    if (cursor) {
+      editor.replaceRange?.('\n\n## 参考文献\n\n', cursor);
     }
   }
 }

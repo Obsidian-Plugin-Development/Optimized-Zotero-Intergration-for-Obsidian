@@ -10,6 +10,8 @@
 import { Notice, setIcon, TFile } from 'obsidian';
 import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
+import { CitationEditModal } from './editModal';
+import { getActiveEditorView } from './cm6LivePreview';
 
 const HIDE_DELAY_MS = 300;
 
@@ -214,6 +216,9 @@ export class CitationPopoverManager {
 			this.scheduleHide();
 		});
 
+		// ── 标题栏：编辑按钮 ──
+		this.renderHeader(popover, target, citeKeys);
+
 		// ── 逐篇构建卡片（纯同步 DOM 操作）──
 
 		for (let i = 0; i < citeKeys.length; i++) {
@@ -272,6 +277,75 @@ export class CitationPopoverManager {
 	}
 
 	// ── 按钮渲染 ──
+
+	// ── 标题栏渲染 ──
+
+	/**
+	 * 在弹窗顶部渲染标题栏，包含编辑引注按钮。
+	 * 读取 target DOM 上的 data-citation-from / data-citation-to 获取坐标，
+	 * 从模块级闭包获取当前 EditorView。
+	 */
+	private renderHeader(popover: HTMLElement, target: HTMLElement, citeKeys: string[]) {
+		const header = popover.createDiv();
+		header.style.cssText = [
+			'display: flex',
+			'align-items: center',
+			'justify-content: space-between',
+			'margin-bottom: 10px',
+			'padding-bottom: 8px',
+			'border-bottom: 1px solid var(--background-modifier-border)',
+		].join(';');
+
+		const label = header.createEl('span');
+		label.setText('引注详情');
+		label.style.cssText =
+			'font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;';
+
+		this.renderEditButton(header, target, citeKeys);
+	}
+
+	// ── 编辑按钮 ──
+
+	/**
+	 * 渲染编辑引注按钮（pencil 图标）。
+	 * 点击时打开 CitationEditModal，传递 view、range、citekeys。
+	 */
+	private renderEditButton(container: HTMLElement, target: HTMLElement, citeKeys: string[]) {
+		const btn = container.createDiv('citation-popover-btn');
+		setIcon(btn, 'pencil');
+		btn.setAttribute('aria-label', '编辑引注');
+
+		btn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+
+			const view = getActiveEditorView();
+			if (!view) {
+				new Notice('无法获取编辑器实例', 3000);
+				return;
+			}
+
+			const fromStr = target.getAttribute('data-citation-from');
+			const toStr = target.getAttribute('data-citation-to');
+			if (!fromStr || !toStr) {
+				new Notice('无法获取引注坐标', 3000);
+				return;
+			}
+
+			const range = { from: Number(fromStr), to: Number(toStr) };
+
+			// 关闭悬浮窗，打开编辑模态框
+			this.hide();
+			new CitationEditModal(
+				this.plugin.app,
+				this.plugin,
+				view,
+				range,
+				citeKeys,
+			).open();
+		});
+	}
+
 
 	/**
 	 * 笔记按钮：在全局根目录（baseStorageFolder）下递归查找 [citekey].md。
