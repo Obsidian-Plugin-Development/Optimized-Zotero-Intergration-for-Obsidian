@@ -150,8 +150,14 @@ export interface ZoteroConnectorSettings {
   floatingButtonCommands?: string[];
   /** v6.0: 同步目标。可选值: 'metadata' | 'annotations' */
   syncTargets?: string[];
-  /** v6.0: CSL 样式标识符，用于文末参考文献的格式化渲染 */
+  /** v6.0: 行内引注 CSL 样式标识符（用于 Live Preview / Reading Mode 的行内编号渲染） */
+  inlineCslStyle?: string;
+  /** v6.0: 参考文献 CSL 样式标识符（用于悬浮弹窗和文末参考文献格式化） */
+  bibliographyCslStyle?: string;
+  /** @deprecated v6.1 拆分为 inlineCslStyle + bibliographyCslStyle */
   cslStyle?: string;
+  /** v6.0: 启用引注渲染（Live Preview + Reading Mode）。默认 true。 */
+  citationRenderingEnabled?: boolean;
   /** v5.2: 开卷自动同步 — 打开匹配触发条件的笔记时静默执行同步 */
   autoSyncOnOpen?: boolean;
   bodyTemplate?: string;

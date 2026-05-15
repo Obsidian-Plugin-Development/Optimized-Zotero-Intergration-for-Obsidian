@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "5.4.0",
+	"version": "6.0.0-alpha.1",
 	"minAppVersion": "1.1.1",
-	"description": "v5.4.0: 悬浮球与自动同步触发条件分离 — 独立可增删的多条件匹配、key+value整合一栏",
+	"description": "v6.0.0-alpha.1: 完全接管引注渲染 — [@citekey] 自动渲染为行内编号、悬停弹窗展示参考文献与交互操作",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

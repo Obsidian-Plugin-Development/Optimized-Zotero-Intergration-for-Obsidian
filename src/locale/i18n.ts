@@ -316,10 +316,36 @@ const en: StringMap = {
     'Select what to sync automatically and via floating button.',
   'settings.sync.targets.metadata': 'Metadata (YAML)',
   'settings.sync.targets.annotations': 'Annotations (Body)',
-  'settings.sync.cslStyle': 'CSL Citation Style',
+  'settings.sync.cslStyle': 'CSL Citation Style (Deprecated)',
   'settings.sync.cslStyle.desc':
-    'Style identifier for inline citations and bibliography (e.g. chicago-author-date, gb-t-7714-2015). Must be installed in Zotero.',
+    'Deprecated. Use the separate Inline CSL and Bibliography CSL fields below.',
   'settings.sync.cslStyle.placeholder': 'e.g. chicago-author-date',
+
+  // ── v6.1 Dual CSL ──
+  'settings.citation.inlineCslStyle': 'Inline CSL Style',
+  'settings.citation.inlineCslStyle.desc':
+    'CSL style for inline citation numbers (e.g. [1], [2]).',
+  'settings.citation.inlineCslStyle.placeholder': 'e.g. chicago-author-date',
+  'settings.citation.bibliographyCslStyle': 'Bibliography CSL Style',
+  'settings.citation.bibliographyCslStyle.desc':
+    'CSL style for bibliography formatting in popovers and reference lists.',
+  'settings.citation.bibliographyCslStyle.placeholder': 'e.g. gb-t-7714-2015',
+
+  // ── v6.0 Citation Rendering ──
+  'settings.citation.renderingEnabled': 'Enable Citation Rendering',
+  'settings.citation.renderingEnabled.desc':
+    'Auto-render [@citekey] placeholders as formatted inline citation numbers in Live Preview and Reading Mode.',
+  'settings.citation.noteFolder': 'Literature Note Folder',
+  'settings.citation.noteFolder.desc':
+    'Folder path for literature notes. [citekey].md files are created here when clicking the note icon. Leave empty for vault root.',
+  'settings.citation.noteFolder.placeholder': 'e.g. LiteratureNotes',
+  'citation.noteNotFound': 'Note file not found. Click to create.',
+  'citation.openInZotero': 'Open in Zotero',
+  'citation.openLink': 'Open URL/DOI',
+  'citation.openNote': 'Open literature note',
+  'citation.resolving': 'Resolving citations...',
+  'citation.resolveFailed': 'Failed to resolve citations from Zotero.',
+
   'settings.sync.citationMode': 'Citation Mode',
   'settings.sync.citationMode.desc':
     'Mode A: Paste [@citekey] placeholder for Pandoc. Mode B: Paste CSL-rendered citation text.',
@@ -647,10 +673,36 @@ const zhCN: StringMap = {
     '选择自动同步和悬浮球触发时要更新的内容。',
   'settings.sync.targets.metadata': '元数据 (YAML)',
   'settings.sync.targets.annotations': '批注 (正文)',
-  'settings.sync.cslStyle': 'CSL 引注样式',
+  'settings.sync.cslStyle': 'CSL 引注样式（旧版）',
   'settings.sync.cslStyle.desc':
-    '行内引注和参考文献的 CSL 样式标识符（如 chicago-author-date、gb-t-7714-2015）。样式需在 Zotero 中安装。',
+    '已弃用。请使用下方独立的行内 CSL 和参考文献 CSL 字段。',
   'settings.sync.cslStyle.placeholder': '例如：gb-t-7714-2015',
+
+  // ── v6.1 双轨 CSL ──
+  'settings.citation.inlineCslStyle': '行内引注 CSL 样式',
+  'settings.citation.inlineCslStyle.desc':
+    '用于行内引注编号（如 [1]、[2]）的 CSL 样式。',
+  'settings.citation.inlineCslStyle.placeholder': '例如：chicago-author-date',
+  'settings.citation.bibliographyCslStyle': '参考文献 CSL 样式',
+  'settings.citation.bibliographyCslStyle.desc':
+    '用于悬浮弹窗和文末参考文献格式化的 CSL 样式。',
+  'settings.citation.bibliographyCslStyle.placeholder': '例如：gb-t-7714-2015',
+
+  // ── v6.0 Citation Rendering ──
+  'settings.citation.renderingEnabled': '启用引注渲染',
+  'settings.citation.renderingEnabled.desc':
+    '在实时预览和阅读模式下，自动将 [@citekey] 占位符渲染为格式化行内引注编号。',
+  'settings.citation.noteFolder': '文献笔记文件夹',
+  'settings.citation.noteFolder.desc':
+    '文献笔记存放文件夹。点击笔记图标时在此创建 [citekey].md 文件。留空则使用根目录。',
+  'settings.citation.noteFolder.placeholder': '例如：LiteratureNotes',
+  'citation.noteNotFound': '笔记文件不存在，点击创建。',
+  'citation.openInZotero': '在 Zotero 中打开',
+  'citation.openLink': '打开链接',
+  'citation.openNote': '打开文献笔记',
+  'citation.resolving': '正在解析引注...',
+  'citation.resolveFailed': '无法从 Zotero 解析引注。',
+
   'settings.sync.citationMode': '引注模式',
   'settings.sync.citationMode.desc':
     '模式 A：粘贴 [@citekey] 占位符（配合 Pandoc 导出）。模式 B：粘贴 CSL 渲染后的格式化引注文本。',

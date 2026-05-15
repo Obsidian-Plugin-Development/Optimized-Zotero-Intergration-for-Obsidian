@@ -17,6 +17,10 @@ import {
 } from './bbt/exportNotes';
 import { getBibFromCiteKeys } from './bbt/jsonRPC';
 import { SyncFloatingButton } from './bbt/SyncFloatingButton';
+import { CitationEngine } from './citation/citationEngine';
+import { citationLivePreviewPlugin } from './citation/cm6LivePreview';
+import { createCitationPostProcessor } from './citation/readingMode';
+import { CitationPopoverManager } from './citation/hoverPopover';
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
 import {
@@ -55,7 +59,10 @@ const DEFAULT_SETTINGS: ZoteroConnectorSettings = {
   autoSyncTriggers: [{ key: '文献标题', value: '' }],
   syncTargets: ['metadata'],
   floatingButtonCommands: ['zdc-update-metadata'],
+  inlineCslStyle: '',
+  bibliographyCslStyle: '',
   cslStyle: '',
+  citationRenderingEnabled: true,
   autoSyncOnOpen: false,
   bodyTemplate: '## Abstract\n\n{{abstract}}\n\n## Notes\n\n{{markdownNotes}}',
   openNoteAfterImport: false,
@@ -87,12 +94,14 @@ export default class ZoteroConnector extends Plugin {
   settings: ZoteroConnectorSettings;
   emitter: Events;
   fuse: Fuse<CiteKeyExport>;
+  citationEngine!: CitationEngine;
+  citationPopover!: CitationPopoverManager;
 
   async onload() {
     try {
+    this.emitter = new Events();
     await this.loadSettings();
     setLocale(this.settings.locale || 'en');
-    this.emitter = new Events();
 
     // 统一注入美化样式（IF 颜色 + 标题跑马灯，动态属性名）
     injectBeautifyStyles(
@@ -108,11 +117,38 @@ export default class ZoteroConnector extends Plugin {
         this.settings.titleMarqueeEnabled || false,
         this.settings.titleMarqueeDuration || 15
       );
+      // CSL 样式变更时清除引注缓存
+      this.citationEngine?.invalidateCache();
     });
 
     this.updatePDFUtility();
     this.addSettingTab(new ZoteroConnectorSettingsTab(this.app, this));
     this.registerView(viewType, (leaf) => new DataExplorerView(this, leaf));
+
+    // ── v6.0：引注渲染引擎初始化 ──
+    this.citationEngine = new CitationEngine(this);
+
+    // 注册 CM6 ViewPlugin（Live Preview 引注渲染）
+    // registerEditorExtension 在 Obsidian >=0.15.0 可用；旧版类型定义未声明此方法
+    const ext = citationLivePreviewPlugin(this.citationEngine, this);
+    // registerEditorExtension 在 Obsidian >=0.15.0 可用；旧版类型定义未声明此方法
+    if (typeof (this as any).registerEditorExtension === 'function') {
+      (this as any).registerEditorExtension(ext);
+    } else {
+      console.warn('[Zotero Plugin] registerEditorExtension not available — Live Preview citation rendering disabled');
+    }
+
+    // 注册 MarkdownPostProcessor（Reading Mode 引注渲染）
+    this.registerMarkdownPostProcessor(
+      createCitationPostProcessor(
+        this.citationEngine,
+        () => !!this.settings.citationRenderingEnabled
+      )
+    );
+
+    // 注册悬停弹窗管理器
+    this.citationPopover = new CitationPopoverManager(this, this.citationEngine);
+    this.citationPopover.register();
 
     this.settings.exportFormats.forEach((f) => {
       this.addExportCommand(f);
@@ -248,6 +284,7 @@ export default class ZoteroConnector extends Plugin {
       this.removeExportCommand(f);
     });
 
+    this.citationPopover?.unregister();
     removeBeautifyStyles();
     this.app.workspace.detachLeavesOfType(viewType);
   }
@@ -334,7 +371,7 @@ export default class ZoteroConnector extends Plugin {
     const bib = await getBibFromCiteKeys(
       citeKeyObjs as any,
       database,
-      this.settings.cslStyle || undefined
+      this.settings.bibliographyCslStyle || this.settings.cslStyle || undefined
     );
     if (!bib) {
       if (!silent) new Notice(t('notice.emptyBib'), 5000);
@@ -344,13 +381,16 @@ export default class ZoteroConnector extends Plugin {
     let markdownBib = htmlToMarkdown(bib);
     // 将编号条目拆分为独立行（匹配「. 」后紧跟「N. 」的条目边界）
     markdownBib = markdownBib.replace(/([.)])\s+(?=\d+\.\s)/g, '$1\n');
+    // v6.1 清除 CSL 残留的内联颜色样式（BBT 可能输出灰色文本）
+    markdownBib = markdownBib.replace(/color\s*:\s*[^;>]+[;>]?\s*/gi, '');
+    markdownBib = markdownBib.replace(/opacity\s*:\s*[^;>]+[;>]?\s*/gi, '');
 
     // 查找或创建 ## 参考文献 标题
     const headingPattern = /^## 参考文献\s*$/m;
     const existingMatch = headingPattern.exec(docText);
 
     if (existingMatch) {
-      // 替换已有参考文献区域
+      // 替换已有参考文献区域（使用 replaceRange 保留光标和撤销历史）
       const headingIndex = existingMatch.index;
       const afterHeading = docText.indexOf('\n', headingIndex);
       const nextHeadingIndex = docText.slice(afterHeading + 1).search(/^## /m);
@@ -358,13 +398,16 @@ export default class ZoteroConnector extends Plugin {
         ? afterHeading + 1 + nextHeadingIndex
         : docText.length;
 
-      const before = docText.slice(0, afterHeading + 1);
-      const after = docText.slice(endIndex);
-      editor.setValue(before + '\n\n' + markdownBib + '\n' + after);
+      // 使用 from/to offset 方式
+      const fromPos = editor.offsetToPos(afterHeading + 1);
+      const toPos = editor.offsetToPos(endIndex);
+      editor.replaceRange('\n\n' + markdownBib + '\n', fromPos, toPos);
     } else {
       // 追加到文档末尾
-      const newContent = docText + '\n\n## 参考文献\n\n' + markdownBib + '\n';
-      editor.setValue(newContent);
+      const lastLine = editor.lastLine();
+      const lastCh = editor.getLine(lastLine).length;
+      const endPos = { line: lastLine, ch: lastCh };
+      editor.replaceRange('\n\n## 参考文献\n\n' + markdownBib + '\n', endPos, endPos);
     }
 
     if (!silent) {
@@ -516,6 +559,14 @@ export default class ZoteroConnector extends Plugin {
         if (target && !targets.includes(target)) targets.push(target);
       }
       this.settings.syncTargets = targets.length > 0 ? targets : ['metadata'];
+    }
+
+    // v6.1: 迁移旧 cslStyle → inlineCslStyle + bibliographyCslStyle
+    if (!this.settings.inlineCslStyle && !this.settings.bibliographyCslStyle && this.settings.cslStyle) {
+      this.settings.inlineCslStyle = this.settings.cslStyle;
+      this.settings.bibliographyCslStyle = this.settings.cslStyle;
+      // 保留 cslStyle 字段供旧代码兼容（不 delete）
+      await this.saveSettings();
     }
 
     // v5.4: 迁移旧 triggerFeatureKey/triggerFeatureValue → floatingButtonTriggers + autoSyncTriggers

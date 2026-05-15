@@ -347,3 +347,91 @@
     box-shadow: var(--shadow-xl) !important;
     transform: scale(1.06) !important;
 }
+
+/* ========================================
+   v6.0 Citation Rendering
+   ======================================== */
+
+/* 行内引注编号 */
+.custom-citation-inline {
+    color: var(--link-color);
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease;
+    padding: 0 1px;
+}
+
+.custom-citation-inline:hover {
+    color: var(--link-color-hover);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 4px;
+}
+
+/* 引注悬浮弹窗 */
+.citation-popover {
+    animation: citationFadeIn 0.15s ease;
+}
+
+@keyframes citationFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 弹窗内参考文献条目 */
+.citation-popover .csl-entry {
+    margin-bottom: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.citation-popover .csl-entry:last-child {
+    margin-bottom: 0;
+}
+
+/* 弹窗操作按钮 */
+.citation-popover-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--icon-color);
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.citation-popover-btn:hover {
+    background: var(--background-modifier-hover);
+    transform: scale(1.08);
+}
+
+.citation-popover-btn:active {
+    transform: scale(0.95);
+}
+
+/* 笔记不存在时置灰 */
+.citation-popover-btn-dim {
+    opacity: 0.4;
+}
+
+.citation-popover-btn-dim:hover {
+    opacity: 0.7;
+}
+
+/* ── v6.1 文末参考文献颜色修复 ── */
+/* 弹窗内参考文献强制继承主题文字颜色 */
+.citation-popover .csl-entry,
+.citation-popover .csl-entry * {
+    color: var(--text-normal) !important;
+}
+
+/* 编辑器内参考文献区域，确保无残留灰色样式 */
+.csl-entry,
+.csl-entry * {
+    color: var(--text-normal) !important;
+}

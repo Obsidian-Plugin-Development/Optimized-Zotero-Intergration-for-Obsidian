@@ -365,16 +365,43 @@ function CitationTab({
 }: CitationTabProps) {
   return (
     <div>
+      {/* v6.0 引注渲染开关 */}
       <SettingItem
-        name={t('settings.sync.cslStyle')}
-        description={t('settings.sync.cslStyle.desc')}
+        name={t('settings.citation.renderingEnabled')}
+        description={t('settings.citation.renderingEnabled.desc')}
+      >
+        <div
+          onClick={() => updateSetting('citationRenderingEnabled', !settings.citationRenderingEnabled)}
+          className={`checkbox-container${settings.citationRenderingEnabled !== false ? ' is-enabled' : ''}`}
+        />
+      </SettingItem>
+
+
+      {/* v6.1 行内引注 CSL 样式 */}
+      <SettingItem
+        name={t('settings.citation.inlineCslStyle')}
+        description={t('settings.citation.inlineCslStyle.desc')}
       >
         <input
-          onChange={(e) => updateSetting('cslStyle', (e.target as HTMLInputElement).value)}
+          onChange={(e) => updateSetting('inlineCslStyle', (e.target as HTMLInputElement).value)}
           type="text"
           spellCheck={false}
-          placeholder={t('settings.sync.cslStyle.placeholder')}
-          defaultValue={settings.cslStyle || ''}
+          placeholder={t('settings.citation.inlineCslStyle.placeholder')}
+          defaultValue={settings.inlineCslStyle || settings.cslStyle || ''}
+        />
+      </SettingItem>
+
+      {/* v6.1 参考文献 CSL 样式 */}
+      <SettingItem
+        name={t('settings.citation.bibliographyCslStyle')}
+        description={t('settings.citation.bibliographyCslStyle.desc')}
+      >
+        <input
+          onChange={(e) => updateSetting('bibliographyCslStyle', (e.target as HTMLInputElement).value)}
+          type="text"
+          spellCheck={false}
+          placeholder={t('settings.citation.bibliographyCslStyle.placeholder')}
+          defaultValue={settings.bibliographyCslStyle || settings.cslStyle || ''}
         />
       </SettingItem>
     </div>
