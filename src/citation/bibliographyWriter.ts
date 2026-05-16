@@ -11,7 +11,7 @@
  * 智能标题管理：
  *   场景 A：正文无引注 + 存在标题 → 彻底删除标题及下方旧列表
  *   场景 B：正文有引注 + 无标题 → 在文档 EOF 自动创建标题+列表
- *   场景 C：正文有引注 + 已有标题 → 严格双空行更新列表内容
+ *   场景 C：正文有引注 + 已有标题 → 紧贴标题更新列表（无空行）
  *
  * 状态指示：
  *   isBibOutOfSync — 正文引注变动时置 true，写入完成后置 false。
@@ -128,7 +128,7 @@ interface BibliographyZone {
 
 /**
  * 在文档中定位参考文献标题，返回其下方的"安全区"。
- * 安全区起点为标题行末尾 + 1，终点为下一个同级或更高级标题的位置。
+ * 安全区起点为标题行末尾（含换行符），终点为下一个同级或更高级标题的位置。
  * 若未找到标题则返回 null。
  */
 function findBibliographyZone(docText: string): BibliographyZone | null {
@@ -139,8 +139,8 @@ function findBibliographyZone(docText: string): BibliographyZone | null {
 	const headingLevel = match[1].length;
 	const headingEnd = match.index + match[0].length;
 
-	// 安全区起点：标题行之后（不超过文档末尾）
-	const zoneStart = Math.min(headingEnd + 1, docText.length);
+	// 安全区起点：标题行末尾（包含标题行换行符，杜绝空行累加）
+	const zoneStart = Math.min(headingEnd, docText.length);
 
 	// 安全区终点：下一个 # 数量 ≤ headingLevel 的标题
 	const searchText = docText.slice(zoneStart);
@@ -205,10 +205,10 @@ function assembleEntries(positionSorted: string[]): string[] | null {
  *   删除标题所在整行 + 下方旧列表，直到下一个同级标题或 EOF。
  *
  * 场景 B — 有引注，无标题，自动创建：
- *   在文档 EOF 追加 \n\n## 标题\n\n列表\n。
+ *   在文档 EOF 追加 \n\n## 标题\n列表\n（标题与列表间无空行）。
  *
  * 场景 C — 有引注，已有标题，精确更新：
- *   安全区位置不变，插入 \n\n列表\n\n，确保标题与第一条文献之间始终隔一个空行。
+ *   安全区覆盖标题行末尾 \n，插入 \n列表\n\n（标题与列表间永无空行）。
  */
 export function updateBibliographyText(view: EditorView) {
 	const docText = view.state.doc.toString();
@@ -256,8 +256,8 @@ export function updateBibliographyText(view: EditorView) {
 	// ═══════════════════════════════════════════
 	if (!headingMatch) {
 		const headingText = _bibHeading;
-		// 默认使用 ## 级别，若用户在设置中指定了包含 # 的格式则尊重
-		const insertText = '\n\n## ' + headingText + '\n\n' + markdownList + '\n';
+		// 标题下方紧跟列表，无空行
+		const insertText = '\n\n## ' + headingText + '\n' + markdownList + '\n';
 		const eof = docText.length;
 
 		console.log('[BibWriter] Scenario B: auto-creating bibliography at EOF (' +
@@ -276,13 +276,13 @@ export function updateBibliographyText(view: EditorView) {
 	const zone = findBibliographyZone(docText);
 	if (!zone) return;
 
-	// ★ v7.2: 严格双空行控制 — \n\n列表\n\n
-	const finalInsertText = '\n\n' + markdownList.trim() + '\n\n';
+	// 标题与列表间不留空行
+	const finalInsertText = '\n' + markdownList.trim() + '\n\n';
 
 	const oldText = docText.slice(zone.from, zone.to);
 
 	// 严格 Diff 比对（防死循环）
-	if (finalInsertText.trim() === oldText.trim()) return;
+	if (finalInsertText === oldText) return;
 
 	if (zone.from > zone.to || zone.from > docText.length) {
 		console.warn('[BibWriter] Invalid zone bounds from=' + zone.from +

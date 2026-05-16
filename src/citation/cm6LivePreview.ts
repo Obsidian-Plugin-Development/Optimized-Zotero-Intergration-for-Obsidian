@@ -193,8 +193,7 @@ class CitationPluginValue implements PluginValue {
 	}
 
 	update(update: ViewUpdate) {
-		const citationAffected = update.docChanged && this.changeAffectsCitations(update);
-		if (citationAffected || update.viewportChanged || update.selectionSet) {
+		if (update.docChanged || update.viewportChanged || update.selectionSet) {
 			this.decorations = this.compute();
 		}
 	}
