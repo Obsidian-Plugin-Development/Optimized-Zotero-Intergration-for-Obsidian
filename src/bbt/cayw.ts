@@ -3,7 +3,6 @@ import { Notice, request } from 'obsidian';
 import { t } from '../locale/i18n';
 import { bringObsidianToFront, focusZotero, getCurrentWindow } from '../helpers';
 import { CitationFormat, DatabaseWithPort } from '../types';
-import { LoadingModal } from './LoadingModal';
 import { defaultHeaders, getPort } from './helpers';
 import { getBibFromCiteKeys } from './jsonRPC';
 import { ZQueue } from './queue';
@@ -28,11 +27,6 @@ export async function isZoteroRunning(
     return cachedIsRunning;
   }
 
-  let modal: LoadingModal;
-  if (!silent) {
-    modal = new LoadingModal(app, t('modal.fetchingData'));
-    modal.open();
-  }
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
@@ -45,13 +39,11 @@ export async function isZoteroRunning(
       headers: defaultHeaders,
     });
 
-    modal?.close();
     cachedIsRunning = res === 'ready';
     lastCheck = Date.now();
     ZQueue.end(qid);
     return cachedIsRunning;
   } catch (e) {
-    modal?.close();
     !silent &&
       new Notice(
         t('notice.zoteroNotRunning'),
@@ -91,13 +83,9 @@ export async function getCAYW(
   // 预最小化 Zotero 主窗口（SW_MINIMIZE=6），引注弹窗有独立 HWND 不受影响
   await focusZotero(database.database);
 
-  const modal = new LoadingModal(app, t('modal.awaitingSelection'));
-  modal.open();
-
   const qid = Symbol();
   try {
     if (format.format === 'formatted-bibliography') {
-      modal.close();
       const citeKeys = await getCiteKeys(database);
       return await getBibFromCiteKeys(citeKeys, database, format.cslStyle);
     }
@@ -113,13 +101,11 @@ export async function getCAYW(
     });
 
     bringObsidianToFront(win);
-    modal.close();
     ZQueue.end(qid);
     return res;
   } catch (e) {
     bringObsidianToFront(win);
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.citationError')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
@@ -164,9 +150,6 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
   // 预最小化 Zotero 主窗口（SW_MINIMIZE=6），引注弹窗有独立 HWND 不受影响
   await focusZotero(database.database);
 
-  const modal = new LoadingModal(app, t('modal.awaitingSelection'));
-  modal.open();
-
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
@@ -185,7 +168,6 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
       bringObsidianToFront(win);
     }, 500);
 
-    modal.close();
     ZQueue.end(qid);
     if (res) {
       return JSON.parse(res).items || [];
@@ -198,7 +180,6 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
       bringObsidianToFront(win);
     }, 500);
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.citeKeyError')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;

@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.2.0",
+	"version": "6.3.1",
 	"minAppVersion": "1.1.1",
-	"description": "v6.2.0: 引注签名Diff防HUD误触发、跨文档签名隔离、首次打开基线建立",
+	"description": "v6.3.1: 视觉补间引擎 — 解耦真实性能与感知性能，最小动画生命周期 + 数字补间 + 三层互斥",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

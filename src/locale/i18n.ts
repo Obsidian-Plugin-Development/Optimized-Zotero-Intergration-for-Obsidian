@@ -182,19 +182,11 @@ const en: StringMap = {
   'command.insertNotes': 'Insert notes into current document',
   'command.importNotes': 'Import notes',
   'command.dataExplorer': 'Data explorer',
-  'command.smartSync': 'Smart Sync',
-  'command.insertInlineCitation': 'Insert Inline Citation',
-  'command.importLiterature': 'Import Literature',
+  'command.smartSync': 'Update Entries',
+  'command.insertCitation': 'Insert Citation',
+  'command.importEntries': 'Import Entries',
   'command.generateBibliography': 'Generate Bibliography',
-  'command.updateBibliography': 'Sync Bibliography',
-
-  // ── 模态框 / 提示 ──
-  'modal.fetchingData': 'Fetching data from Zotero...',
-  'modal.fetchingNotes': 'Fetching notes from Zotero...',
-  'modal.fetchingCollections': 'Fetching collections from Zotero...',
-  'modal.awaitingSelection': 'Awaiting item selection from Zotero...',
-  'modal.extractingAnnotations': 'Extracting annotations...',
-  'modal.updatingPDFUtility': 'Updating Obsidian Zotero Integration PDF Utility...',
+  'command.updateReferences': 'Update References',
 
   // ── 通知 / 错误 ──
   'notice.zoteroNotRunning':
@@ -355,8 +347,8 @@ const en: StringMap = {
   'settings.sync.citationMode.placeholder': 'Mode A: [@citekey] Placeholder',
   'settings.sync.citationMode.rendered': 'Mode B: CSL Rendered Citation',
   'notice.inlineCitationInserted': 'Inline citation inserted.',
-  'notice.bibliographyGenerated': 'Bibliography generated with %s entries.',
-  'notice.bibliographyUpdated': 'Bibliography updated with %s entries.',
+  'notice.bibliographyGenerated': 'Bibliography generated.',
+  'notice.bibliographyUpdated': 'Bibliography updated.',
   'notice.noCiteKeysFound': 'No [@citekey] references found in document.',
 
   // ── v5.4 Floating Button & Auto-Sync Triggers ──
@@ -394,6 +386,13 @@ const en: StringMap = {
   'settings.template.bodyTemplate.desc':
     'Markdown body content. Use {{key}} as placeholders — they will be replaced by the corresponding property values.',
   'settings.template.deleteMapping': 'Delete',
+  // ── v6.3.0 hardcoded string migration ──
+  'notice.noCiteKeyExtracted': 'Cannot extract citeKey from current file',
+  'notice.noActiveEditorView': 'No active editor view found',
+  'notice.bibliographyUpdateFailed': 'Failed to update bibliography',
+  'notice.importLiteratureCompleted': 'Import completed: %s file(s)',
+  'notice.importLiteratureFailed': 'Import failed: %s',
+  'notice.pluginLoadFailed': 'Zotero plugin load failed: %s',
 };
 
 const zhCN: StringMap = {
@@ -545,19 +544,11 @@ const zhCN: StringMap = {
   'command.insertNotes': '将笔记插入当前文档',
   'command.importNotes': '导入为独立笔记',
   'command.dataExplorer': '数据浏览器',
-  'command.smartSync': '智能同步',
-  'command.insertInlineCitation': '插入行内引注',
-  'command.importLiterature': '导入文献条目',
+  'command.smartSync': '更新条目',
+  'command.insertCitation': '插入引注',
+  'command.importEntries': '导入条目',
   'command.generateBibliography': '生成参考文献列表',
-  'command.updateBibliography': '同步参考文献列表',
-
-  // ── 模态框 / 提示 ──
-  'modal.fetchingData': '正在从 Zotero 获取数据...',
-  'modal.fetchingNotes': '正在从 Zotero 获取笔记...',
-  'modal.fetchingCollections': '正在从 Zotero 获取收藏集...',
-  'modal.awaitingSelection': '等待从 Zotero 选择条目...',
-  'modal.extractingAnnotations': '正在提取批注...',
-  'modal.updatingPDFUtility': '正在更新 Obsidian Zotero Integration PDF 工具...',
+  'command.updateReferences': '更新文献',
 
   // ── 通知 / 错误 ──
   'notice.zoteroNotRunning':
@@ -715,8 +706,8 @@ const zhCN: StringMap = {
   'settings.sync.citationMode.placeholder': '模式 A：[@citekey] 占位符',
   'settings.sync.citationMode.rendered': '模式 B：CSL 格式化引注',
   'notice.inlineCitationInserted': '行内引注已插入。',
-  'notice.bibliographyGenerated': '参考文献列表已生成，共 %s 条。',
-  'notice.bibliographyUpdated': '参考文献列表已更新，共 %s 条。',
+  'notice.bibliographyGenerated': '参考文献列表已生成。',
+  'notice.bibliographyUpdated': '参考文献列表已更新。',
   'notice.noCiteKeysFound': '文档中未找到 [@citekey] 引用。',
 
   // ── v5.4 悬浮球与自动同步触发条件 ──
@@ -754,6 +745,13 @@ const zhCN: StringMap = {
   'settings.template.bodyTemplate.desc':
     '正文 Markdown 内容。使用 {{key}} 作为占位符——它们会被对应属性值替换。',
   'settings.template.deleteMapping': '删除',
+  // ── v6.3.0 硬编码字符串迁移 ──
+  'notice.noCiteKeyExtracted': '⚠️ 无法从当前文件提取 citeKey',
+  'notice.noActiveEditorView': '⚠️ 未找到活跃的编辑器视图',
+  'notice.bibliographyUpdateFailed': '❌ 更新参考文献失败',
+  'notice.importLiteratureCompleted': '✅ 导入完成：%s 篇文献',
+  'notice.importLiteratureFailed': '❌ 导入失败：%s',
+  'notice.pluginLoadFailed': '❌ Zotero插件加载失败：%s',
 };
 
 // ─── 翻译函数 ─────────────────────────────────────────────────────

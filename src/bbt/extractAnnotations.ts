@@ -4,7 +4,6 @@ import path from 'path';
 import { ensureExecutableSync, getExeName, getExeRoot } from 'src/helpers';
 
 import { t } from '../locale/i18n';
-import { LoadingModal } from './LoadingModal';
 
 interface ExtractParams {
   noWrite?: boolean;
@@ -39,9 +38,6 @@ export async function extractAnnotations(
   params: ExtractParams,
   overridePath?: string
 ) {
-  const modal = new LoadingModal(app, t('modal.extractingAnnotations'));
-  modal.open();
-
   const args = [input];
 
   Object.keys(params).forEach((k) => {
@@ -78,9 +74,7 @@ export async function extractAnnotations(
       args
     );
 
-    modal.close();
-
-    if (result.stderr.toLowerCase().includes('password')) {
+	    if (result.stderr.toLowerCase().includes('password')) {
       new Notice(
         t('notice.pdfPassword', path.basename(input)),
         10000
@@ -95,8 +89,6 @@ export async function extractAnnotations(
 
     return result.stdout;
   } catch (e) {
-    modal.close();
-
     if (e.message.toLowerCase().includes('password')) {
       new Notice(
         t('notice.pdfPassword', path.basename(input)),

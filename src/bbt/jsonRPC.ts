@@ -3,7 +3,7 @@ import { Notice, htmlToMarkdown, moment, request } from 'obsidian';
 import { t } from '../locale/i18n';
 import { padNumber } from '../helpers';
 import { CiteKeyExport, DatabaseWithPort } from '../types';
-import { LoadingModal } from './LoadingModal';
+// v6.3.0: LoadingModal removed — callers handle progress via HUD or their own UI
 import { CiteKey, getCiteKeyFromAny, isZoteroRunning } from './cayw';
 import { defaultHeaders, getPort } from './helpers';
 import { ZQueue } from './queue';
@@ -13,9 +13,6 @@ export async function getNotesFromCiteKeys(
   database: DatabaseWithPort
 ) {
   let res: string;
-
-  const modal = new LoadingModal(app, t('modal.fetchingNotes'));
-  modal.open();
 
   const qid = Symbol();
   try {
@@ -35,14 +32,12 @@ export async function getNotesFromCiteKeys(
     });
   } catch (e) {
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.errorRetrievingNotes')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  modal.close();
 
   try {
     return JSON.parse(res).result;
@@ -58,9 +53,6 @@ export async function getCollectionFromCiteKey(
   database: DatabaseWithPort
 ) {
   let res: string;
-
-  const modal = new LoadingModal(app, t('modal.fetchingCollections'));
-  modal.open();
 
   const qid = Symbol();
   try {
@@ -80,14 +72,12 @@ export async function getCollectionFromCiteKey(
     });
   } catch (e) {
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.errorRetrievingNotes')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  modal.close();
 
   try {
     const result = JSON.parse(res).result;
@@ -121,9 +111,6 @@ export async function getAttachmentsFromCiteKey(
 ) {
   let res: string;
 
-  const modal = new LoadingModal(app, t('modal.fetchingCollections'));
-  modal.open();
-
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
@@ -142,14 +129,12 @@ export async function getAttachmentsFromCiteKey(
     });
   } catch (e) {
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.errorRetrievingNotes')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  modal.close();
 
   try {
     return JSON.parse(res).result;
@@ -244,12 +229,6 @@ export async function getBibFromCiteKeys(
   if (!citeKeys || !citeKeys.length) return null;
 
   let res: string;
-  let modal: LoadingModal;
-  if (!silent) {
-    modal = new LoadingModal(app, t('modal.fetchingData'));
-    modal.open();
-  }
-
   const qid = Symbol();
   try {
     const params: Record<string, any> = {
@@ -278,14 +257,12 @@ export async function getBibFromCiteKeys(
     });
   } catch (e) {
     console.error(e);
-    !silent && modal.close();
     new Notice(`${t('notice.errorRetrievingBib')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  !silent && modal.close();
 
   try {
     const parsed = JSON.parse(res);
@@ -316,12 +293,6 @@ export async function getItemJSONFromCiteKeys(
 ) {
   let res: string;
 
-  let modal: LoadingModal | undefined;
-  if (!silent) {
-    modal = new LoadingModal(app, t('modal.fetchingData'));
-    modal.open();
-  }
-
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
@@ -344,14 +315,12 @@ export async function getItemJSONFromCiteKeys(
     });
   } catch (e) {
     console.error(e);
-    modal?.close();
-    if (!silent) new Notice(`${t('notice.errorRetrievingItem')} ${e.message}`, 10000);
+      if (!silent) new Notice(`${t('notice.errorRetrievingItem')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  modal?.close();
 
   try {
     const parsed = JSON.parse(res);
@@ -375,9 +344,6 @@ export async function getItemJSONFromRelations(
   database: DatabaseWithPort
 ) {
   let res: string;
-
-  const modal = new LoadingModal(app, t('modal.fetchingData'));
-  modal.open();
 
   const uriMap: Record<string, string> = {};
   const idOrder: string[] = [];
@@ -407,14 +373,12 @@ export async function getItemJSONFromRelations(
     });
   } catch (e) {
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.errorRetrievingItem')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  modal.close();
 
   const idMap: Record<string, any> = {};
   const citekeys: CiteKey[] = [];
@@ -462,9 +426,6 @@ export async function getIssueDateFromCiteKey(
 ) {
   let res: string;
 
-  const modal = new LoadingModal(app, t('modal.fetchingData'));
-  modal.open();
-
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
@@ -487,14 +448,12 @@ export async function getIssueDateFromCiteKey(
     });
   } catch (e) {
     console.error(e);
-    modal.close();
     new Notice(`${t('notice.errorRetrievingItem')} ${e.message}`, 10000);
     ZQueue.end(qid);
     return null;
   }
 
   ZQueue.end(qid);
-  modal.close();
 
   try {
     const parsed = JSON.parse(res);

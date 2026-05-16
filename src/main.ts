@@ -3,7 +3,6 @@ import { EditableFileView, Editor, Events, Notice, Plugin, TFile, htmlToMarkdown
 import { shellPath } from 'shell-path';
 
 import { DataExplorerView, viewType } from './DataExplorerView';
-import { LoadingModal } from './bbt/LoadingModal';
 import { getCiteKeys } from './bbt/cayw';
 import {
   injectBeautifyStyles,
@@ -141,8 +140,6 @@ export default class ZoteroConnector extends Plugin {
 	    // v6.7: 初始化纯文本参考文献同步引擎
 	    initBibliographyWriter(this.citationEngine, this.settings.bibliographyHeading || '参考文献');
 
-	    // v6.4: 状态栏指示器 — 提示 bibliography 锚点状态
-	    this.addBibliographyStatusBar();
     } else {
       console.warn('[Zotero Plugin] registerEditorExtension not available — Live Preview citation rendering disabled');
     }
@@ -175,13 +172,19 @@ export default class ZoteroConnector extends Plugin {
         const cache = this.app.metadataCache.getFileCache(file);
         const citeKey = (cache?.frontmatter?.citekey || cache?.frontmatter?.citationKey || file.basename) as string;
         if (!citeKey) {
-          new Notice('⚠️ 无法从当前文件提取 citeKey', 4000);
+          new Notice(t('notice.noCiteKeyExtracted'), 4000);
           return;
         }
+        const hud = SyncFloatingButton.instance;
+        hud?.showProgress();
+        hud?.setProgress(5);
         try {
+          hud?.setProgress(25);
           await this.runSilentAutoSync(citeKey, 1, file.path);
-          new Notice(t('notice.autoSyncCompleted'), 3000);
+          hud?.setProgress(100);
+          // 补间引擎在 visual=100 时自动触发 triggerSuccess()
         } catch (e) {
+          hud?.hideProgress();
           new Notice(t('notice.autoSyncFailed'), 4000);
         }
       },
@@ -190,7 +193,7 @@ export default class ZoteroConnector extends Plugin {
     // 命令 A：插入文中引注 — 直接插入 [@citekey] 纯文本
     this.addCommand({
       id: 'zdc-insert-inline-citation',
-      name: t('command.insertInlineCitation'),
+      name: t('command.insertCitation'),
       editorCallback: async (editor) => {
         const database = {
           database: this.settings.database,
@@ -214,22 +217,28 @@ export default class ZoteroConnector extends Plugin {
     // 命令 B：手动更新文末参考文献列表（v7.1 解耦自动触发）
     this.addCommand({
       id: 'update-bibliography',
-      name: t('command.updateBibliography'),
+      name: t('command.updateReferences'),
       editorCallback: async (_editor) => {
         const view = getActiveEditorView();
         if (!view || (view as any).isDestroyed) {
-          new Notice('⚠️ 未找到活跃的编辑器视图', 3000);
+          new Notice(t('notice.noActiveEditorView'), 3000);
           return;
         }
+        const hud = SyncFloatingButton.instance;
+        hud?.showProgress();
+        hud?.setProgress(20);
         try {
           const filePath = this.app.workspace.getActiveFile()?.path;
           updateBibliographyText(view, filePath);
           markBibClean();
           try { this.emitter.trigger('bibClean'); } catch { /* 静默 */ }
-          new Notice('✅ ' + t('notice.bibliographyUpdated'), 3000);
+          hud?.setProgress(100);
+          // 补间引擎在 visual=100 时自动触发 triggerSuccess()
+          new Notice(t('notice.bibliographyUpdated'), 3000);
         } catch (e) {
+          hud?.hideProgress();
           console.error('[update-bibliography]', e);
-          new Notice('❌ 更新参考文献失败', 4000);
+          new Notice(t('notice.bibliographyUpdateFailed'), 4000);
         }
       },
     });
@@ -237,12 +246,16 @@ export default class ZoteroConnector extends Plugin {
     // 命令 C：导入文献条目 — 从 Zotero 选择条目并创建带完整属性映射的笔记
     this.addCommand({
       id: 'zdc-import-literature',
-      name: t('command.importLiterature'),
+      name: t('command.importEntries'),
       callback: async () => {
         const database = {
           database: this.settings.database,
           port: this.settings.port,
         };
+        // 先打开 Zotero 选择器——此阶段 HUD 不触发
+        const selectedKeys = await getCiteKeys(database);
+        if (!selectedKeys.length) return; // 用户取消了选择
+
         const plainExportFormat: ExportFormat = {
           name: '__quick_import__',
           outputPathTemplate: this.settings.baseStorageFolder
@@ -251,11 +264,15 @@ export default class ZoteroConnector extends Plugin {
           imageOutputPathTemplate: '{{citekey}}/',
           imageBaseNameTemplate: 'image',
         };
+        // 用户选定文献后，HUD 才开始加载动画
+        const hud = SyncFloatingButton.instance;
+        hud?.showProgress();
+        hud?.setProgress(2);
         const progressNotice = new Notice('', 0);
         try {
           const paths = await exportToMarkdown(
             { settings: this.settings, database, exportFormat: plainExportFormat },
-            undefined,
+            selectedKeys,
             ({ macro, micro }) => {
               progressNotice.noticeEl.empty();
               progressNotice.noticeEl.createSpan({ text: macro });
@@ -265,16 +282,37 @@ export default class ZoteroConnector extends Plugin {
                 microEl.style.fontSize = '0.85em';
                 microEl.style.opacity = '0.8';
               }
+              // Parse X/Total from macro to update HUD progress ring
+              const match = macro.match(/(\d+)\/(\d+)/);
+              if (match && hud) {
+                const cur = parseInt(match[1], 10);
+                const tot = parseInt(match[2], 10);
+                const ratio = tot > 0 ? cur / tot : 0;
+                let pct: number;
+                if (micro?.includes('元数据')) {
+                  pct = Math.round(ratio * 25);
+                } else if (micro?.includes('附件') || micro?.includes('PDF')) {
+                  pct = 25 + Math.round(ratio * 45);
+                } else if (micro?.includes('组装') || micro?.includes('Markdown')) {
+                  pct = 70 + Math.round(ratio * 28);
+                } else {
+                  pct = Math.round(ratio * 100);
+                }
+                hud.setProgress(pct);
+              }
             },
           );
           progressNotice.hide();
-          new Notice(`✅ 导入完成：${paths.length} 篇文献`, 3000);
+          hud?.setProgress(100);
+          // 补间引擎在 visual=100 时自动触发 triggerSuccess()
+          new Notice(t('notice.importLiteratureCompleted', String(paths.length)), 3000);
           this.openNotes(paths);
         } catch (e) {
           progressNotice.hide();
+          hud?.hideProgress();
           console.error('[import-literature]', e);
           new Notice(
-            `❌ 导入失败：${e instanceof Error ? e.message : 'Unknown error'}`,
+            t('notice.importLiteratureFailed', e instanceof Error ? e.message : 'Unknown error'),
             5000,
           );
         }
@@ -345,7 +383,7 @@ export default class ZoteroConnector extends Plugin {
     fixPath();
     } catch (e) {
       console.error('[Zotero Plugin] onload error:', e);
-      new Notice(`Zotero插件加载失败: ${e instanceof Error ? e.message : String(e)}`, 10000);
+      new Notice(t('notice.pluginLoadFailed', e instanceof Error ? e.message : String(e)), 10000);
     }
   }
 
@@ -368,11 +406,18 @@ export default class ZoteroConnector extends Plugin {
           database: this.settings.database,
           port: this.settings.port,
         };
+        // 先打开 Zotero 选择器——此阶段 HUD 不触发
+        const selectedKeys = await getCiteKeys(database);
+        if (!selectedKeys.length) return; // 用户取消了选择
+
+        const hud = SyncFloatingButton.instance;
+        hud?.showProgress();
+        hud?.setProgress(2);
         const progressNotice = new Notice('', 0);
         try {
           const paths = await exportToMarkdown(
             { settings: this.settings, database, exportFormat: format },
-            undefined,
+            selectedKeys,
             ({ macro, micro }) => {
               progressNotice.noticeEl.empty();
               progressNotice.noticeEl.createSpan({ text: macro });
@@ -384,20 +429,41 @@ export default class ZoteroConnector extends Plugin {
                 microEl.style.fontSize = '0.85em';
                 microEl.style.opacity = '0.8';
               }
+              // Parse X/Total from macro to update HUD progress ring
+              const match = macro.match(/(\d+)\/(\d+)/);
+              if (match && hud) {
+                const cur = parseInt(match[1], 10);
+                const tot = parseInt(match[2], 10);
+                const ratio = tot > 0 ? cur / tot : 0;
+                let pct: number;
+                if (micro?.includes('元数据')) {
+                  pct = Math.round(ratio * 25);
+                } else if (micro?.includes('附件') || micro?.includes('PDF')) {
+                  pct = 25 + Math.round(ratio * 45);
+                } else if (micro?.includes('组装') || micro?.includes('Markdown')) {
+                  pct = 70 + Math.round(ratio * 28);
+                } else {
+                  pct = Math.round(ratio * 100);
+                }
+                hud.setProgress(pct);
+              }
             }
           );
           progressNotice.noticeEl.empty();
           progressNotice.noticeEl.createSpan({
-            text: `✅ 导入完成：${paths.length} 篇文献`,
+            text: t('notice.importLiteratureCompleted', String(paths.length)),
           });
           setTimeout(() => progressNotice.hide(), 3000);
+          hud?.setProgress(100);
+          // 补间引擎在 visual=100 时自动触发 triggerSuccess()
           this.openNotes(paths);
         } catch (e) {
           progressNotice.noticeEl.empty();
           progressNotice.noticeEl.createSpan({
-            text: `❌ 导入失败：${e instanceof Error ? e.message : '未知错误'}`,
+            text: t('notice.importLiteratureFailed', e instanceof Error ? e.message : '未知错误'),
           });
           setTimeout(() => progressNotice.hide(), 5000);
+          hud?.hideProgress();
         }
       },
     });
@@ -614,12 +680,6 @@ export default class ZoteroConnector extends Plugin {
       !_exeInternalVersion ||
       _exeInternalVersion !== internalVersion
     ) {
-      const modal = new LoadingModal(
-        app,
-        t('modal.updatingPDFUtility')
-      );
-      modal.open();
-
       try {
         const success = await downloadAndExtract();
 
@@ -632,60 +692,6 @@ export default class ZoteroConnector extends Plugin {
         //
       }
 
-      modal.close();
-    }
-  }
-
-  // ── v6.4 Bibliography Anchor Status Bar ──
-
-  private bibStatusBarItem: HTMLElement | null = null;
-
-  private addBibliographyStatusBar() {
-    this.bibStatusBarItem = this.addStatusBarItem();
-    this.bibStatusBarItem.addClass('citation-bib-status');
-    this.bibStatusBarItem.style.cssText =
-      'cursor: pointer; font-size: 12px; color: var(--text-muted);';
-    this.bibStatusBarItem.setText('');
-
-    this.registerEvent(
-      this.app.workspace.on('active-leaf-change', () => this.updateBibStatusBar())
-    );
-    this.updateBibStatusBar();
-  }
-
-  private removeBibliographyStatusBar() {
-    this.bibStatusBarItem?.remove();
-    this.bibStatusBarItem = null;
-  }
-
-  private updateBibStatusBar() {
-    if (!this.bibStatusBarItem) return;
-
-    const view = this.app.workspace.getActiveViewOfType(EditableFileView);
-    if (!view?.editor) {
-      this.bibStatusBarItem.setText('');
-      return;
-    }
-
-    try {
-      const docText = (view.editor as any).getValue?.() || '';
-      const hasCitations = /\[@([^\]]+)\]/.test(docText);
-      const hasBibAnchor = hasBibHeading(docText);
-
-      if (hasCitations && !hasBibAnchor) {
-        this.bibStatusBarItem.setText('Bibliography: add ## 参考文献 heading');
-        this.bibStatusBarItem.style.color = 'var(--text-warning)';
-        this.bibStatusBarItem.onclick = () => this.insertBibliographyAnchor();
-      } else if (hasCitations && hasBibAnchor) {
-        this.bibStatusBarItem.setText('Bibliography: synced');
-        this.bibStatusBarItem.style.color = 'var(--text-success)';
-        this.bibStatusBarItem.onclick = null;
-      } else {
-        this.bibStatusBarItem.setText('');
-        this.bibStatusBarItem.onclick = null;
-      }
-    } catch {
-      this.bibStatusBarItem.setText('');
     }
   }
 

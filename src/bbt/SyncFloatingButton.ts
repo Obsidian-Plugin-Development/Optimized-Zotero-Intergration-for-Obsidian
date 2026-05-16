@@ -1,4 +1,6 @@
 import { MarkdownView, Notice, setIcon, TFile } from 'obsidian';
+import { getItemJSONFromCiteKeys } from './jsonRPC';
+import { getCiteKeyFromAny } from './cayw';
 import type ZoteroConnector from '../main';
 import { t } from '../locale/i18n';
 import type { TriggerCondition } from '../types';
@@ -46,6 +48,27 @@ export class SyncFloatingButton {
   private startLocalLeft = 0;
   private startLocalTop = 0;
   private containerEl: HTMLElement | null = null;
+  private wrapper: HTMLElement | null = null;
+  private isProgressing = false;
+
+  // v6.3.0-alpha.1: 生命周期元素
+  private progressText: HTMLElement | null = null;
+  private checkIcon: HTMLElement | null = null;
+  private iconWrap: HTMLElement | null = null;
+  private successTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // v6.3.1: 视觉进度补间引擎
+  private visualProgress = 0;
+  private targetProgress = 0;
+  private tweenRafId: ReturnType<typeof requestAnimationFrame> | null = null;
+  private tweenStartTime = 0;
+  private tweenLastTime = 0;
+  private pendingSuccess = false;
+  private static readonly MIN_ANIMATION_MS = 800;
+  private static readonly ANIMATION_SPEED = 200; // 百分比/秒
+
+  // 静态实例引用 — 允许命令面板/外部访问 HUD
+  static instance: SyncFloatingButton | null = null;
 
   // 阈值：移动超过此像素数才算拖拽
   private readonly DRAG_THRESHOLD = 3;
@@ -56,13 +79,132 @@ export class SyncFloatingButton {
   // v5.2 自动同步防抖 (static 跨实例共享)
   // 同时记录已执行同步的命令快照，用户修改「执行同步内容」勾选后重开文件可立即生效
   private static autoSyncDebounceMap = new Map<string, { time: number; commands: string[] }>();
+  private static metadataHashCache = new Map<string, string>();
   private static readonly AUTO_SYNC_DEBOUNCE_MS = 3 * 60 * 1000; // 3 分钟
   // 飞行中 tracker：防止同一文件并发执行两次同步
   private static inFlightSet = new Set<string>();
 
   constructor(plugin: ZoteroConnector) {
     this.plugin = plugin;
+    SyncFloatingButton.instance = this;
     this.registerListeners();
+  }
+
+  // ── v6.3.1 生命周期 + 视觉补间引擎 ──
+
+  /** 阶段1: 启动加载 — 显示进度环 + 数字淡入 + 图标淡出 + 启动补间循环 */
+  showProgress() {
+    if (this.isProgressing) return;
+    this.isProgressing = true;
+    if (this.successTimer) { clearTimeout(this.successTimer); this.successTimer = null; }
+    if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
+    const w = this.wrapper;
+    if (!w) return;
+    w.addClass("is-progressing");
+    w.addClass("is-loading");
+    w.removeClass("is-success");
+    this.visualProgress = 0;
+    this.targetProgress = 0;
+    this.pendingSuccess = false;
+    this.tweenStartTime = performance.now();
+    this.tweenLastTime = this.tweenStartTime;
+    w.style.setProperty("--sync-progress", "0");
+    if (this.progressText) this.progressText.textContent = '0%';
+    this.startTween();
+  }
+
+  /** 阶段2: 设置真实进度目标 — 补间引擎自动追赶 */
+  setProgress(pct: number) {
+    if (!this.isProgressing) return;
+    const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+    this.targetProgress = clamped;
+    if (clamped >= 100) {
+      this.pendingSuccess = true;
+    }
+    // 如果补间循环意外停止，重启它
+    if (!this.tweenRafId) {
+      this.startTween();
+    }
+  }
+
+  /** 补间引擎：requestAnimationFrame 循环，平滑追赶 targetProgress */
+  private startTween() {
+    if (this.tweenRafId) return;
+    const tick = (now: number) => {
+      const elapsed = now - this.tweenStartTime;
+      const dt = Math.min((now - this.tweenLastTime) / 1000, 0.1);
+      this.tweenLastTime = now;
+
+      // 最小动画生命周期：根据已用时间计算必须达到的进度下限
+      const minReach = Math.min(100, (elapsed / SyncFloatingButton.MIN_ANIMATION_MS) * 100);
+      // 追赶目标：取真实进度和最小进度的较大值
+      const goal = Math.max(this.targetProgress, minReach);
+
+      // 每帧平滑追赶
+      const maxStep = SyncFloatingButton.ANIMATION_SPEED * dt;
+      const diff = goal - this.visualProgress;
+      if (diff > 0.5) {
+        this.visualProgress += Math.min(maxStep, diff);
+      } else {
+        this.visualProgress = goal;
+      }
+
+      const displayPct = Math.round(this.visualProgress);
+      this.wrapper?.style.setProperty("--sync-progress", String(displayPct));
+      if (this.progressText) this.progressText.textContent = `${displayPct}%`;
+
+      // 检查是否完成：视觉进度到 100 且底层已标记完成
+      if (this.visualProgress >= 99.5 && this.pendingSuccess) {
+        this.visualProgress = 100;
+        this.wrapper?.style.setProperty("--sync-progress", "100");
+        if (this.progressText) this.progressText.textContent = '100%';
+        this.tweenRafId = null;
+        this.triggerSuccess();
+        return;
+      }
+
+      this.tweenRafId = requestAnimationFrame(tick);
+    };
+    this.tweenRafId = requestAnimationFrame(tick);
+  }
+
+  /** 阶段3: 完成庆祝 — 数字淡出 + 绿色对勾淡入（仅由补间引擎在 visual=100 时调用） */
+  private triggerSuccess() {
+    const w = this.wrapper;
+    if (!w) return;
+    w.removeClass("is-loading");
+    w.addClass("is-success");
+    // 阶段4: 1.4s 后自动复原
+    this.successTimer = setTimeout(() => this.resetToIdle(), 1400);
+  }
+
+  /** 阶段4: 自动复原 — 对勾淡出 + 进度环淡出 + 图标恢复 */
+  private resetToIdle() {
+    if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
+    this.isProgressing = false;
+    this.pendingSuccess = false;
+    const w = this.wrapper;
+    if (!w) return;
+    w.removeClass("is-progressing");
+    w.removeClass("is-loading");
+    w.removeClass("is-success");
+    w.style.setProperty("--sync-progress", "0");
+    this.successTimer = null;
+  }
+
+  /** 中止进度（错误/取消时调用，直接回到 idle） */
+  hideProgress() {
+    if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
+    if (this.successTimer) { clearTimeout(this.successTimer); this.successTimer = null; }
+    if (!this.isProgressing) return;
+    this.isProgressing = false;
+    this.pendingSuccess = false;
+    const w = this.wrapper;
+    if (!w) return;
+    w.removeClass("is-progressing");
+    w.removeClass("is-loading");
+    w.removeClass("is-success");
+    w.style.setProperty("--sync-progress", "0");
   }
 
   // ── 容器引用 ──
@@ -75,12 +217,12 @@ export class SyncFloatingButton {
   // ── 位置记忆 ──
 
   private savePosition() {
-    const btn = this.button;
-    if (!btn) return;
+    const wrapper = this.wrapper;
+    if (!wrapper) return;
     const pos: SavedPosition = {
-      left: btn.style.left || 'auto',
-      right: btn.style.right || 'auto',
-      top: btn.style.top || '50px',
+      left: wrapper.style.left || 'auto',
+      right: wrapper.style.right || 'auto',
+      top: wrapper.style.top || '50px',
     };
     try {
       localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(pos));
@@ -207,17 +349,42 @@ export class SyncFloatingButton {
       return;
     }
 
+    // ★ v6.3.0: 差分检测 — 仅当 Zotero 数据真正变化时才触发同步
+    const currentHash = await this.computeMetadataHash(citeKey);
+    if (currentHash) {
+      const storedHash = SyncFloatingButton.metadataHashCache.get(file.path);
+      if (storedHash === currentHash) {
+        // 数据未变化，跳过同步
+        SyncFloatingButton.autoSyncDebounceMap.set(file.path, {
+          time: Date.now(),
+          commands: [...targets],
+        });
+        return;
+      }
+    }
+
+    // ★ v6.3.0-alpha.1: HUD 全生命周期进度
+    this.showProgress();
+    this.setProgress(5);
+
     SyncFloatingButton.inFlightSet.add(file.path);
     try {
+      this.setProgress(25);
       await this.plugin.runSilentAutoSync(citeKey, 1, file.path);
-      // 仅在成功完成后设置防抖时间戳与命令快照，失败不阻塞重试
+      this.setProgress(85);
       SyncFloatingButton.autoSyncDebounceMap.set(file.path, {
         time: Date.now(),
         commands: [...targets],
       });
-      new Notice(t('notice.autoSyncCompleted'), 3000);
+      // 缓存新哈希值
+      if (currentHash) {
+        SyncFloatingButton.metadataHashCache.set(file.path, currentHash);
+      }
+      this.setProgress(100);
+      // 补间引擎在 visual=100 时自动触发 triggerSuccess()
     } catch (e) {
       console.error('[AutoSync]', e);
+      this.hideProgress();
       new Notice(t('notice.autoSyncFailed'), 3000);
     } finally {
       SyncFloatingButton.inFlightSet.delete(file.path);
@@ -231,17 +398,19 @@ export class SyncFloatingButton {
     if (!container) return;
 
     // 按钮属于不同的容器（切换了视图）→ 销毁重建
-    if (this.button && this.button.parentElement !== container) {
+    if (this.wrapper && this.wrapper.parentElement !== container) {
       this.cleanup?.();
-      this.button.remove();
+      this.wrapper.remove();
+      this.wrapper = null;
       this.button = null;
       this.cleanup = null;
       this.containerEl = null;
     }
 
     // 按钮已从 DOM 断开（被 Obsidian 重渲染移除）→ 清理状态
-    if (this.button && !this.button.isConnected) {
+    if (this.wrapper && !this.wrapper.isConnected) {
       this.cleanup?.();
+      this.wrapper = null;
       this.button = null;
       this.cleanup = null;
       this.containerEl = null;
@@ -251,20 +420,41 @@ export class SyncFloatingButton {
 
     this.containerEl = container;
 
-    const btn = container.createDiv('sync-floating-button');
-    // Obsidian 原生 Lucide 图标，自动适配亮暗主题
-    setIcon(btn, 'file-text');
+    // v6.3.0: 进度环 wrapper
+    const wrapper = container.createDiv('sync-floating-wrapper');
+    this.wrapper = wrapper;
+
+    const btn = wrapper.createDiv('sync-floating-button');
 
     // 基础样式
     btn.style.cssText = this.buildBaseStyle();
 
-    // 恢复记忆位置
+    // v6.3.0-alpha.1: 生命周期子元素
+    // 图标包装（用于淡入淡出）
+    const iconWrap = btn.createSpan('sync-icon-wrap');
+    setIcon(iconWrap, 'file-text');
+    this.iconWrap = iconWrap;
+
+    // 百分比数字
+    const progressText = btn.createSpan('sync-progress-text');
+    progressText.textContent = '0%';
+    this.progressText = progressText;
+
+    // 绿色对勾
+    const checkIcon = btn.createSpan('sync-check-icon');
+    checkIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+    this.checkIcon = checkIcon;
+
+    // 恢复记忆位置（无记忆时使用默认右下角）
     const saved = this.loadPosition();
     if (saved) {
-      if (saved.left !== 'auto') btn.style.left = saved.left;
-      if (saved.right !== 'auto') btn.style.right = saved.right;
-      btn.style.top = saved.top;
-      btn.style.bottom = 'auto';
+      if (saved.left !== 'auto') wrapper.style.left = saved.left;
+      if (saved.right !== 'auto') wrapper.style.right = saved.right;
+      wrapper.style.top = saved.top;
+      wrapper.style.bottom = 'auto';
+    } else {
+      wrapper.style.right = '30px';
+      wrapper.style.bottom = '50px';
     }
 
     this.button = btn;
@@ -279,23 +469,29 @@ export class SyncFloatingButton {
 
   /** v7.1: 根据 isBibOutOfSync 切换图标 — 脏 file-pen / 干净 file-text */
   private updateBibStatusIcon() {
-    const btn = this.button;
-    if (!btn) return;
+    const wrap = this.iconWrap;
+    if (!wrap) return;
     if (isBibOutOfSync) {
-      setIcon(btn, 'file-pen');
+      setIcon(wrap, 'file-pen');
     } else {
-      setIcon(btn, 'file-text');
+      setIcon(wrap, 'file-text');
     }
   }
 
   private destroy() {
     this.closeMenu();
-    if (this.button) {
+    if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
+    if (this.successTimer) { clearTimeout(this.successTimer); this.successTimer = null; }
+    if (this.wrapper) {
       this.cleanup?.();
       // 销毁前保存位置
       this.savePosition();
-      this.button.remove();
+      this.wrapper.remove();
+      this.wrapper = null;
       this.button = null;
+      this.iconWrap = null;
+      this.progressText = null;
+      this.checkIcon = null;
       this.cleanup = null;
       this.containerEl = null;
     }
@@ -305,13 +501,9 @@ export class SyncFloatingButton {
 
   private buildBaseStyle(): string {
     return [
-      'position: absolute',
-      'right: 30px',
-      'bottom: 50px',
-      'z-index: 99',
       'width: 44px',
       'height: 44px',
-      'border-radius: 12px',
+      'border-radius: 50%',
       'background: var(--background-secondary)',
       'border: 1px solid var(--background-modifier-border)',
       'box-shadow: var(--shadow-l)',
@@ -328,27 +520,28 @@ export class SyncFloatingButton {
   // ── 垂直边界修正 ──
 
   private clampVerticalPosition() {
-    const btn = this.button;
-    if (!btn || !this.containerEl) return;
+    const wrapper = this.wrapper;
+    if (!wrapper || !this.containerEl) return;
 
     const containerRect = this.containerEl.getBoundingClientRect();
-    const btnRect = btn.getBoundingClientRect();
-    const localTop = btnRect.top - containerRect.top;
-    const maxTop = containerRect.height - btn.offsetHeight;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const localTop = wrapperRect.top - containerRect.top;
+    const maxTop = containerRect.height - wrapper.offsetHeight;
 
     if (localTop < 0) {
-      btn.style.top = '0px';
-      btn.style.bottom = 'auto';
+      wrapper.style.top = '0px';
+      wrapper.style.bottom = 'auto';
     } else if (localTop > maxTop) {
-      btn.style.top = `${maxTop}px`;
-      btn.style.bottom = 'auto';
+      wrapper.style.top = `${maxTop}px`;
+      wrapper.style.bottom = 'auto';
     }
   }
 
-  // ── 拖拽逻辑（局部坐标系：相对于 containerEl）──
+  // ── v6.3.0 拖拽逻辑（wrapper 驱动定位，btn 承载视觉）──
 
   private bindDrag() {
     const btn = this.button!;
+    const wrapper = this.wrapper!;
 
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
@@ -364,23 +557,22 @@ export class SyncFloatingButton {
       if (!container) return;
 
       const containerRect = container.getBoundingClientRect();
-      const btnRect = btn.getBoundingClientRect();
+      const wrapperRect = wrapper.getBoundingClientRect();
 
-      this.startLocalLeft = btnRect.left - containerRect.left;
-      this.startLocalTop = btnRect.top - containerRect.top;
+      this.startLocalLeft = wrapperRect.left - containerRect.left;
+      this.startLocalTop = wrapperRect.top - containerRect.top;
 
-      // 切换为 left/top 驱动
-      btn.style.left = `${this.startLocalLeft}px`;
-      btn.style.top = `${this.startLocalTop}px`;
-      btn.style.right = 'auto';
-      btn.style.bottom = 'auto';
+      // wrapper 切换为 left/top 驱动
+      wrapper.style.left = `${this.startLocalLeft}px`;
+      wrapper.style.top = `${this.startLocalTop}px`;
+      wrapper.style.right = 'auto';
+      wrapper.style.bottom = 'auto';
 
-      // 拖拽中样式
-      btn.style.transition = 'none';
+      // 拖拽中视觉
+      wrapper.style.transition = 'none';
       btn.style.cursor = 'grabbing';
       btn.style.boxShadow = 'var(--shadow-xl)';
       btn.style.transform = 'scale(1.08)';
-      btn.style.borderRadius = '14px';
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -402,11 +594,11 @@ export class SyncFloatingButton {
       const newLocalLeft = this.startLocalLeft + dx;
       const newLocalTop = this.startLocalTop + dy;
 
-      const maxLeft = containerRect.width - btn.offsetWidth;
-      const maxTop = containerRect.height - btn.offsetHeight;
+      const maxLeft = containerRect.width - wrapper.offsetWidth;
+      const maxTop = containerRect.height - wrapper.offsetHeight;
 
-      btn.style.left = `${Math.max(0, Math.min(newLocalLeft, maxLeft))}px`;
-      btn.style.top = `${Math.max(0, Math.min(newLocalTop, maxTop))}px`;
+      wrapper.style.left = `${Math.max(0, Math.min(newLocalLeft, maxLeft))}px`;
+      wrapper.style.top = `${Math.max(0, Math.min(newLocalTop, maxTop))}px`;
     };
 
     const onMouseUp = () => {
@@ -416,7 +608,6 @@ export class SyncFloatingButton {
       btn.style.cursor = 'grab';
       btn.style.boxShadow = 'var(--shadow-l)';
       btn.style.transform = 'scale(1)';
-      btn.style.borderRadius = '12px';
 
       if (this.hasMoved) {
         this.snapToEdge();
@@ -437,38 +628,39 @@ export class SyncFloatingButton {
     };
   }
 
-  // ── 边缘吸附（相对于 containerEl 的左右边缘）──
+  // ── v6.3.0 边缘吸附（wrapper 驱动）──
 
   private snapToEdge() {
-    const btn = this.button;
-    if (!btn) return;
+    const wrapper = this.wrapper;
+    if (!wrapper) return;
 
     const container = this.containerEl;
     if (!container) return;
 
     const containerRect = container.getBoundingClientRect();
-    const btnRect = btn.getBoundingClientRect();
+    const wrapperRect = wrapper.getBoundingClientRect();
 
-    const btnCenterX = btnRect.left - containerRect.left + btnRect.width / 2;
-    const distToLeft = btnCenterX;
-    const distToRight = containerRect.width - btnCenterX;
+    const centerX = wrapperRect.left - containerRect.left + wrapperRect.width / 2;
+    const distToLeft = centerX;
+    const distToRight = containerRect.width - centerX;
 
-    btn.style.transition = 'left 0.3s cubic-bezier(0.25, 0.8, 0.25, 1.2), right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1.2)';
+    wrapper.style.transition = 'left 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.35s cubic-bezier(0.22, 0.61, 0.36, 1)';
 
     if (distToLeft < distToRight) {
-      btn.style.left = `${this.SNAP_MARGIN}px`;
-      btn.style.right = 'auto';
+      wrapper.style.left = `${this.SNAP_MARGIN}px`;
+      wrapper.style.right = 'auto';
     } else {
-      btn.style.left = 'auto';
-      btn.style.right = `${this.SNAP_MARGIN}px`;
+      wrapper.style.left = 'auto';
+      wrapper.style.right = `${this.SNAP_MARGIN}px`;
     }
 
     // 垂直边界修正
     this.clampVerticalPosition();
 
+    // 动画结束后清除 transition 以避免干扰后续拖拽
     setTimeout(() => {
-      if (btn) btn.style.transition = 'box-shadow 0.2s ease, transform 0.15s ease, border-radius 0.15s ease';
-    }, 350);
+      if (wrapper) wrapper.style.transition = '';
+    }, 400);
   }
 
   // ── 点击触发 ──
@@ -479,16 +671,15 @@ export class SyncFloatingButton {
       return;
     }
 
-    // v6.0: 基于 syncTargets 构建菜单
+    // v6.3.0-alpha.1: 菜单顺序 — 导入条目 / 更新条目 / 插入引注 / 更新文献
     const targets = this.plugin.settings.syncTargets || ['metadata'];
     const menuCommands: string[] = [];
 
+    menuCommands.push('zdc-import-literature');
     if (targets.includes('metadata') || targets.includes('annotations')) {
       menuCommands.push('zdc-smart-sync');
     }
-    menuCommands.push('zdc-import-literature');
     menuCommands.push('zdc-insert-inline-citation');
-    // v7.1: 始终显示更新参考文献选项
     menuCommands.push('update-bibliography');
 
     if (menuCommands.length === 0) return;
@@ -504,10 +695,10 @@ export class SyncFloatingButton {
 
   private getCommandLabel(cmdId: string): string {
     const keyMap: Record<string, string> = {
+      'zdc-import-literature': 'command.importEntries',
       'zdc-smart-sync': 'command.smartSync',
-      'zdc-import-literature': 'command.importLiterature',
-      'zdc-insert-inline-citation': 'command.insertInlineCitation',
-      'update-bibliography': 'command.updateBibliography',
+      'zdc-insert-inline-citation': 'command.insertCitation',
+      'update-bibliography': 'command.updateReferences',
     };
     return t(keyMap[cmdId] || cmdId);
   }
@@ -527,7 +718,7 @@ export class SyncFloatingButton {
       'min-width: 180px',
       'background: var(--background-primary)',
       'border: 1px solid var(--background-modifier-border)',
-      'border-radius: 12px',
+      'border-radius: 8px',
       'box-shadow: 0 8px 32px rgba(0,0,0,0.18)',
       'padding: 4px 0',
       'color: var(--text-normal)',
@@ -659,12 +850,59 @@ export class SyncFloatingButton {
     const citeKey = this.extractCiteKeyFromFile(file);
     if (!citeKey) return;
 
+    this.showProgress();
+    this.setProgress(5);
+    SyncFloatingButton.inFlightSet.add(file.path);
     try {
+      this.setProgress(25);
       await this.plugin.runSilentAutoSync(citeKey, 1, file.path);
-      new Notice(t('notice.autoSyncCompleted'), 3000);
+      this.setProgress(85);
+      const currentHash = await this.computeMetadataHash(citeKey);
+      if (currentHash) {
+        SyncFloatingButton.metadataHashCache.set(file.path, currentHash);
+      }
+      this.setProgress(100);
+      // 补间引擎在 visual=100 时自动触发 triggerSuccess()
     } catch (e) {
       console.error('[SmartSync]', e);
       new Notice(t('notice.autoSyncFailed'), 3000);
+      this.hideProgress();
+    } finally {
+      SyncFloatingButton.inFlightSet.delete(file.path);
+    }
+  }
+
+  /** v6.3.0: 计算 Zotero 条目元数据哈希，用于差分同步 */
+  private async computeMetadataHash(citeKey: string): Promise<string | null> {
+    try {
+      const database = { database: this.plugin.settings.database, port: this.plugin.settings.port };
+      const citeKeyObj = await getCiteKeyFromAny(citeKey, database);
+      if (!citeKeyObj) return null;
+      const items = await getItemJSONFromCiteKeys([citeKeyObj], database, citeKeyObj.library, true);
+      if (!items || !items.length) return null;
+      const item = items[0];
+      const fields = [
+        item.title ?? "",
+        item.abstract ?? "",
+        item.DOI ?? "",
+        item.URL ?? "",
+        item.date ?? "",
+        item.issued?.["date-parts"]?.flat()?.join("-") ?? "",
+        JSON.stringify(item.author ?? []),
+        JSON.stringify(item.editor ?? []),
+        item.version ?? "",
+        item.status ?? "",
+      ];
+      const joined = fields.join("|");
+      let hash = 0;
+      for (let i = 0; i < joined.length; i++) {
+        const chr = joined.charCodeAt(i);
+        hash = ((hash << 5) - hash) + chr;
+        hash |= 0;
+      }
+      return String(hash);
+    } catch {
+      return null;
     }
   }
 
