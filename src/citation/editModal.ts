@@ -1,18 +1,23 @@
 /**
- * v6.1.0-alpha.1 引注编辑/插入双模模态框
+ * v6.1.0 引注编辑/插入双模模态框 — 富文本卡片 + 拖拽排序
  *
  * 双模式复用同一个 Modal：
- *   - 编辑模式（editRange 存在）：标签云展示已有 citekey，保存时 view.dispatch 精准替换原坐标
- *   - 插入模式（editRange 为空）：标签云初始为空，保存时在光标处插入新引注
+ *   - 编辑模式（editRange 存在）：富文本卡片展示 citekey 元数据，保存时 view.dispatch 精准替换原坐标
+ *   - 插入模式（editRange 为空）：卡片初始为空，保存时在光标处插入新引注
  *
- * 提供所见即所得 (WYSIWYG) 的引注编辑体验：
- *   - 标签云 (Tag Chips)：展示当前 citekey，每个带 × 删除按钮
- *   - 搜索添加：复用 Zotero BBT picker 添加新文献
- *   - 原子化替换：保存时通过 view.dispatch() 精准替换源码坐标
+ * 富文本卡片：
+ *   - 拖拽手柄 (grip-vertical) + 编号徽章 + 作者/年份/标题/期刊 + 删除按钮
+ *   - 异步加载元数据：缓存命中即时渲染，未命中显示占位 + 后台轮询
+ *   - HTML5 DragEvent 拖拽排序，保存时按显示顺序组装 Pandoc 语法
  */
 import { Modal, setIcon } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import type ZoteroConnector from '../main';
+import {
+	extractAuthorsSmart,
+	extractYear,
+	extractJournalSmart,
+} from '../bbt/smartExtractors';
 
 /** BBT picker 返回的 citekey 对象 */
 interface CiteKeyObj {
@@ -34,11 +39,37 @@ async function loadGetCiteKeys() {
 	return _getCiteKeys;
 }
 
+const POLL_INTERVAL_MS = 200;
+const MAX_POLL_TIME_MS = 15000;
+const TITLE_MAX_LEN = 60;
+
+/**
+ * 从 CSL-JSON 条目提取第一作者（纯文本，剥离标记字符）。
+ */
+function extractFirstAuthor(item: any): string {
+	const authors = extractAuthorsSmart(item);
+	if (authors.length === 0) return '';
+	return authors[0].replace(/[\u2021\u2709\uFE0E]/g, '').trim();
+}
+
+/**
+ * 清洗标题：剥离 markdown 链接语法，截断过长文本。
+ */
+function cleanTitle(item: any, key: string): string {
+	let title = item.title || '';
+	// 剥离 markdown 链接: [text](url)
+	title = title.replace(/^\[/, '').replace(/\]\(.*\)$/, '');
+	if (!title) return `@${key}`;
+	if (title.length > TITLE_MAX_LEN) title = title.slice(0, TITLE_MAX_LEN - 3) + '...';
+	return title;
+}
+
 export class CitationEditModal extends Modal {
 	private citeKeys: string[];
-	private chipContainer!: HTMLElement;
+	private cardContainer!: HTMLElement;
 	private saveBtn!: HTMLButtonElement;
 	private addBtn!: HTMLButtonElement;
+	private loadingIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
 	constructor(
 		app: ZoteroConnector['app'],
@@ -48,7 +79,6 @@ export class CitationEditModal extends Modal {
 		initialKeys: string[] = [],
 	) {
 		super(app);
-		// 深拷贝，避免外部修改
 		this.citeKeys = [...initialKeys];
 	}
 
@@ -72,26 +102,16 @@ export class CitationEditModal extends Modal {
 		title.setText(this.range ? '编辑引注' : '插入引注');
 		title.style.cssText = 'margin: 0; font-size: 16px; font-weight: 600;';
 
-		// ── 标签云区域 ──
-		const chipSection = contentEl.createDiv();
-		chipSection.style.cssText = 'margin-bottom: 16px;';
+		// ── 卡片区域 ──
+		const cardSection = contentEl.createDiv();
+		cardSection.style.cssText = 'margin-bottom: 16px;';
 
-		const chipLabel = chipSection.createEl('div');
-		chipLabel.setText('已选文献');
-		chipLabel.style.cssText =
+		const cardLabel = cardSection.createEl('div');
+		cardLabel.setText('已选文献');
+		cardLabel.style.cssText =
 			'font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;';
 
-		this.chipContainer = chipSection.createDiv('citation-edit-chips');
-		this.chipContainer.style.cssText = [
-			'display: flex',
-			'flex-wrap: wrap',
-			'gap: 6px',
-			'min-height: 32px',
-			'padding: 8px 10px',
-			'background: var(--background-secondary)',
-			'border-radius: 8px',
-			'border: 1px solid var(--background-modifier-border)',
-		].join(';');
+		this.cardContainer = cardSection.createDiv('citation-edit-cards');
 
 		// ── 操作按钮区 ──
 		const actions = contentEl.createDiv();
@@ -177,87 +197,282 @@ export class CitationEditModal extends Modal {
 			return false;
 		});
 
-		// ★ 所有 DOM 就绪后渲染 chips
-		this.renderChips();
+		// DOM 就绪后渲染卡片
+		this.renderCards();
 	}
 
 	onClose() {
+		this.clearLoadingIntervals();
 		const { contentEl } = this;
 		contentEl.empty();
 	}
 
-	// ── 标签云渲染 ──
+	// ── 轮询清理 ──
 
-	private renderChips() {
-		this.chipContainer.empty();
+	private clearLoadingIntervals() {
+		for (const id of this.loadingIntervals.values()) {
+			clearInterval(id);
+		}
+		this.loadingIntervals.clear();
+	}
+
+	// ── 卡片渲染 ──
+
+	private renderCards() {
+		this.clearLoadingIntervals();
+		this.cardContainer.empty();
 
 		if (this.citeKeys.length === 0) {
-			const empty = this.chipContainer.createEl('span');
+			const empty = this.cardContainer.createEl('span');
 			empty.setText('暂无文献，请点击「+ 添加文献」');
 			empty.style.cssText =
-				'color: var(--text-faint); font-style: italic; font-size: 12px; padding: 4px 0;';
+				'color: var(--text-faint); font-style: italic; font-size: 12px; padding: 12px 0; display: block; text-align: center;';
 			this.updateSaveButton();
 			return;
 		}
 
-		for (const key of this.citeKeys) {
-			const chip = this.chipContainer.createDiv('citation-edit-chip');
-			chip.style.cssText = [
-				'display: inline-flex',
-				'align-items: center',
-				'gap: 4px',
-				'padding: 3px 4px 3px 10px',
-				'background: var(--interactive-accent)',
-				'color: var(--text-on-accent)',
-				'border-radius: 20px',
-				'font-size: 12px',
-				'font-weight: 500',
-				'line-height: 1.4',
-				'user-select: none',
-			].join(';');
+		const engine = this.plugin.citationEngine;
+		const missingKeys: string[] = [];
 
-			const label = chip.createEl('span');
-			label.setText(`@${key}`);
+		for (let i = 0; i < this.citeKeys.length; i++) {
+			const key = this.citeKeys[i];
+			const item = engine.getIndividualJsonCached(key);
+			const number = engine.getNumber(key) || 0;
 
-			const removeBtn = chip.createEl('span');
-			removeBtn.setText('×');
-			removeBtn.style.cssText = [
-				'display: inline-flex',
-				'align-items: center',
-				'justify-content: center',
-				'width: 18px',
-				'height: 18px',
-				'border-radius: 50%',
-				'background: rgba(255,255,255,0.2)',
-				'cursor: pointer',
-				'font-size: 14px',
-				'font-weight: 700',
-				'line-height: 1',
-				'transition: background 0.1s',
-			].join(';');
-			removeBtn.addEventListener('mouseenter', () => {
-				removeBtn.style.background = 'rgba(255,255,255,0.4)';
-			});
-			removeBtn.addEventListener('mouseleave', () => {
-				removeBtn.style.background = 'rgba(255,255,255,0.2)';
-			});
-			removeBtn.addEventListener('click', (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				this.removeCiteKey(key);
-			});
+			if (item) {
+				this.renderCard(i, key, number, item);
+			} else {
+				missingKeys.push(key);
+				this.renderPlaceholderCard(i, key, number);
+			}
+		}
 
-			chip.appendChild(removeBtn);
+		if (missingKeys.length > 0) {
+			engine.precacheAllBibs(missingKeys);
+			this.startPollingForMetadata(missingKeys);
 		}
 
 		this.updateSaveButton();
+	}
+
+	/**
+	 * 渲染富文本卡片（缓存命中）。
+	 */
+	private renderCard(index: number, key: string, number: number, item: any) {
+		const card = this.cardContainer.createDiv('citation-edit-card');
+		card.setAttribute('data-index', String(index));
+		card.setAttribute('data-key', key);
+
+		// 拖拽手柄
+		const handle = card.createSpan('citation-edit-card-handle');
+		setIcon(handle, 'grip-vertical');
+		handle.draggable = true;
+		this.attachDragEvents(handle, card, index);
+
+		// 编号徽章
+		const badge = card.createSpan('citation-edit-card-number');
+		badge.setText(number > 0 ? `[${number}]` : '[?]');
+
+		// 元数据主体
+		const body = card.createDiv('citation-edit-card-body');
+
+		const metaRow = body.createDiv('citation-edit-card-meta');
+		const authorEl = metaRow.createSpan('citation-edit-card-author');
+		authorEl.setText(extractFirstAuthor(item) || `@${key}`);
+		const yearEl = metaRow.createSpan('citation-edit-card-year');
+		const yearText = extractYear(item);
+		if (yearText) yearEl.setText(`(${yearText})`);
+
+		const titleEl = body.createSpan('citation-edit-card-title');
+		titleEl.setText(cleanTitle(item, key));
+
+		const journalText = extractJournalSmart(item);
+		if (journalText) {
+			const journalEl = body.createSpan('citation-edit-card-journal');
+			journalEl.setText(journalText);
+		}
+
+		// 删除按钮
+		const deleteBtn = card.createSpan('citation-edit-card-delete');
+		deleteBtn.setText('\u00D7');
+		deleteBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.removeCiteKey(key);
+		});
+	}
+
+	/**
+	 * 渲染占位卡片（缓存未命中）。
+	 */
+	private renderPlaceholderCard(index: number, key: string, number: number) {
+		const card = this.cardContainer.createDiv(
+			'citation-edit-card citation-edit-card-loading',
+		);
+		card.setAttribute('data-index', String(index));
+		card.setAttribute('data-key', key);
+
+		// 拖拽手柄（占位卡片也可拖拽）
+		const handle = card.createSpan('citation-edit-card-handle');
+		setIcon(handle, 'grip-vertical');
+		handle.draggable = true;
+		this.attachDragEvents(handle, card, index);
+
+		// 编号徽章
+		const badge = card.createSpan('citation-edit-card-number');
+		badge.setText(number > 0 ? `[${number}]` : '[?]');
+
+		// 占位内容
+		const body = card.createDiv('citation-edit-card-body');
+		const nameEl = body.createSpan('citation-edit-card-author');
+		nameEl.setText(`@${key}`);
+		const loadingEl = body.createSpan('citation-edit-card-title');
+		loadingEl.setText('加载中...');
+
+		// 删除按钮
+		const deleteBtn = card.createSpan('citation-edit-card-delete');
+		deleteBtn.setText('\u00D7');
+		deleteBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.removeCiteKey(key);
+		});
+	}
+
+	/**
+	 * 构建富卡片元素（用于更新单个占位卡片）。
+	 */
+	private buildCardElement(index: number, key: string, number: number, item: any): HTMLElement {
+		const card = createDiv('citation-edit-card');
+		card.setAttribute('data-index', String(index));
+		card.setAttribute('data-key', key);
+
+		const handle = card.createSpan('citation-edit-card-handle');
+		setIcon(handle, 'grip-vertical');
+		handle.draggable = true;
+		this.attachDragEvents(handle, card, index);
+
+		const badge = card.createSpan('citation-edit-card-number');
+		badge.setText(number > 0 ? `[${number}]` : '[?]');
+
+		const body = card.createDiv('citation-edit-card-body');
+
+		const metaRow = body.createDiv('citation-edit-card-meta');
+		const authorEl = metaRow.createSpan('citation-edit-card-author');
+		authorEl.setText(extractFirstAuthor(item) || `@${key}`);
+		const yearEl = metaRow.createSpan('citation-edit-card-year');
+		const yearText = extractYear(item);
+		if (yearText) yearEl.setText(`(${yearText})`);
+
+		const titleEl = body.createSpan('citation-edit-card-title');
+		titleEl.setText(cleanTitle(item, key));
+
+		const journalText = extractJournalSmart(item);
+		if (journalText) {
+			const journalEl = body.createSpan('citation-edit-card-journal');
+			journalEl.setText(journalText);
+		}
+
+		const deleteBtn = card.createSpan('citation-edit-card-delete');
+		deleteBtn.setText('\u00D7');
+		deleteBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.removeCiteKey(key);
+		});
+
+		return card;
+	}
+
+	// ── 拖拽事件 ──
+
+	private attachDragEvents(handle: HTMLElement, card: HTMLElement, index: number) {
+		handle.addEventListener('dragstart', (e: DragEvent) => {
+			e.dataTransfer!.effectAllowed = 'move';
+			e.dataTransfer!.setData('text/plain', String(index));
+			card.addClass('is-dragging');
+		});
+
+		handle.addEventListener('dragend', () => {
+			card.removeClass('is-dragging');
+			this.cardContainer.querySelectorAll('.zt-drag-over').forEach(
+				(el) => el.removeClass('zt-drag-over'),
+			);
+		});
+
+		card.addEventListener('dragover', (e: DragEvent) => {
+			e.preventDefault();
+			e.dataTransfer!.dropEffect = 'move';
+			card.addClass('zt-drag-over');
+		});
+
+		card.addEventListener('dragleave', () => {
+			card.removeClass('zt-drag-over');
+		});
+
+		card.addEventListener('drop', (e: DragEvent) => {
+			e.preventDefault();
+			card.removeClass('zt-drag-over');
+
+			const fromIndex = parseInt(e.dataTransfer!.getData('text/plain'), 10);
+			if (isNaN(fromIndex) || fromIndex === index) return;
+
+			const [moved] = this.citeKeys.splice(fromIndex, 1);
+			this.citeKeys.splice(index, 0, moved);
+			this.renderCards();
+		});
+	}
+
+	// ── 异步元数据轮询 ──
+
+	private startPollingForMetadata(keys: string[]) {
+		const engine = this.plugin.citationEngine;
+		const startTime = Date.now();
+
+		for (const key of keys) {
+			// 跳过已经在轮询中的 key
+			if (this.loadingIntervals.has(key)) continue;
+
+			const intervalId = setInterval(() => {
+				const item = engine.getIndividualJsonCached(key);
+				if (item) {
+					clearInterval(intervalId);
+					this.loadingIntervals.delete(key);
+					this.updateSingleCard(key, item);
+					return;
+				}
+				if (Date.now() - startTime > MAX_POLL_TIME_MS) {
+					clearInterval(intervalId);
+					this.loadingIntervals.delete(key);
+				}
+			}, POLL_INTERVAL_MS);
+
+			this.loadingIntervals.set(key, intervalId);
+		}
+	}
+
+	/**
+	 * 单个卡片更新：用富卡片 DOM 替换占位卡片。
+	 */
+	private updateSingleCard(key: string, item: any) {
+		const index = this.citeKeys.indexOf(key);
+		if (index === -1) return;
+
+		const placeholder = this.cardContainer.querySelector(
+			`.citation-edit-card[data-key="${key}"]`,
+		) as HTMLElement | null;
+		if (!placeholder) return;
+
+		const number = this.plugin.citationEngine.getNumber(key) || 0;
+		const newCard = this.buildCardElement(index, key, number, item);
+		placeholder.replaceWith(newCard);
 	}
 
 	// ── 增删 citekey ──
 
 	private removeCiteKey(key: string) {
 		this.citeKeys = this.citeKeys.filter((k) => k !== key);
-		this.renderChips();
+		this.renderCards();
 	}
 
 	private async onAddCiteKeys() {
@@ -275,7 +490,7 @@ export class CitationEditModal extends Modal {
 					this.citeKeys.push(item.key);
 				}
 			}
-			this.renderChips();
+			this.renderCards();
 		} catch {
 			// 用户取消选择或 BBT 不可用
 		}
@@ -290,7 +505,7 @@ export class CitationEditModal extends Modal {
 	}
 
 	/**
-	 * ★ 双模式保存
+	 * 双模式保存
 	 *
 	 * 编辑模式（range 存在）：重组 Pandoc 语法，view.dispatch 精准替换 [from, to) 范围。
 	 * 插入模式（range 为空）：在光标处插入新引注。
@@ -302,7 +517,6 @@ export class CitationEditModal extends Modal {
 			: '';
 
 		if (this.range) {
-			// 编辑模式：替换原坐标区域
 			this.view.dispatch({
 				changes: {
 					from: this.range.from,
@@ -311,7 +525,6 @@ export class CitationEditModal extends Modal {
 				},
 			});
 		} else {
-			// 插入模式：光标处插入
 			if (!newText) {
 				this.close();
 				return;

@@ -60,7 +60,7 @@ function extractTitleSmart(item: any): string {
  * | 2      | ["Author1 ‡", "Author2 ✉︎"] |
  * | 3+     | ["Author1 ‡", "AuthorN ✉︎", "et al."] |
  */
-function extractAuthorsSmart(item: any): string[] {
+export function extractAuthorsSmart(item: any): string[] {
   const creators = item.creators || [];
   if (creators.length === 0) return [];
 
@@ -80,7 +80,7 @@ function extractAuthorsSmart(item: any): string[] {
   return result;
 }
 
-function extractYear(item: any): string {
+export function extractYear(item: any): string {
   if (!item.date) return '';
   // date 可能是 moment 对象或字符串
   if (typeof item.date === 'string') {
@@ -162,7 +162,7 @@ function extractJournalAbbr(item: any): string {
   return item.journalAbbreviation || '';
 }
 
-function extractJournalSmart(item: any): string {
+export function extractJournalSmart(item: any): string {
   // 优先使用简称，否则使用全称，兼容预印本
   const abbr = item.journalAbbreviation;
   const full = item.publicationTitle;
