@@ -57,6 +57,12 @@ export class SyncFloatingButton {
   private iconWrap: HTMLElement | null = null;
   private successTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // v6.4.0: SVG 环形进度条元素
+  private ringTrack: SVGCircleElement | null = null;
+  private ringFill: SVGCircleElement | null = null;
+  private static readonly RING_RADIUS = 21;
+  private static readonly RING_CIRCUMFERENCE = 2 * Math.PI * 21;
+
   // v6.3.1: 视觉进度补间引擎
   private visualProgress = 0;
   private targetProgress = 0;
@@ -108,7 +114,15 @@ export class SyncFloatingButton {
     this.pendingSuccess = false;
     this.tweenStartTime = performance.now();
     this.tweenLastTime = this.tweenStartTime;
-    w.style.setProperty("--sync-progress", "0");
+    w.style.removeProperty("--sync-progress");
+    if (this.ringTrack) {
+      this.ringTrack.style.strokeDasharray = String(SyncFloatingButton.RING_CIRCUMFERENCE);
+      this.ringTrack.style.strokeDashoffset = '0';
+    }
+    if (this.ringFill) {
+      this.ringFill.style.strokeDasharray = String(SyncFloatingButton.RING_CIRCUMFERENCE);
+      this.ringFill.style.strokeDashoffset = String(SyncFloatingButton.RING_CIRCUMFERENCE);
+    }
     if (this.progressText) this.progressText.textContent = '0%';
     this.startTween();
   }
@@ -150,13 +164,16 @@ export class SyncFloatingButton {
       }
 
       const displayPct = Math.round(this.visualProgress);
-      this.wrapper?.style.setProperty("--sync-progress", String(displayPct));
+      const offset = SyncFloatingButton.RING_CIRCUMFERENCE * (1 - displayPct / 100);
+      if (this.ringFill) {
+        this.ringFill.style.strokeDashoffset = String(offset);
+      }
       if (this.progressText) this.progressText.textContent = `${displayPct}%`;
 
       // 检查是否完成：视觉进度到 100 且底层已标记完成
       if (this.visualProgress >= 99.5 && this.pendingSuccess) {
         this.visualProgress = 100;
-        this.wrapper?.style.setProperty("--sync-progress", "100");
+        if (this.ringFill) this.ringFill.style.strokeDashoffset = '0';
         if (this.progressText) this.progressText.textContent = '100%';
         this.tweenRafId = null;
         this.triggerSuccess();
@@ -188,8 +205,9 @@ export class SyncFloatingButton {
     w.removeClass("is-progressing");
     w.removeClass("is-loading");
     w.removeClass("is-success");
-    w.style.setProperty("--sync-progress", "0");
+    if (this.ringFill) this.ringFill.style.strokeDashoffset = String(SyncFloatingButton.RING_CIRCUMFERENCE);
     this.successTimer = null;
+    this.updateBibStatusIcon();
   }
 
   /** 中止进度（错误/取消时调用，直接回到 idle） */
@@ -204,7 +222,7 @@ export class SyncFloatingButton {
     w.removeClass("is-progressing");
     w.removeClass("is-loading");
     w.removeClass("is-success");
-    w.style.setProperty("--sync-progress", "0");
+    if (this.ringFill) this.ringFill.style.strokeDashoffset = String(SyncFloatingButton.RING_CIRCUMFERENCE);
   }
 
   // ── 容器引用 ──
@@ -429,6 +447,34 @@ export class SyncFloatingButton {
     // 基础样式
     btn.style.cssText = this.buildBaseStyle();
 
+    // v6.4.0: SVG 环形进度条（抗锯齿 + stroke-dashoffset 驱动）
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('class', 'sync-progress-ring');
+    svg.setAttribute('viewBox', '0 0 50 50');
+    const track = document.createElementNS(svgNS, 'circle');
+    track.setAttribute('class', 'sync-ring-track');
+    track.setAttribute('cx', '25');
+    track.setAttribute('cy', '25');
+    track.setAttribute('r', String(SyncFloatingButton.RING_RADIUS));
+    track.setAttribute('fill', 'none');
+    track.setAttribute('stroke-width', '4');
+    const fill = document.createElementNS(svgNS, 'circle');
+    fill.setAttribute('class', 'sync-ring-fill');
+    fill.setAttribute('cx', '25');
+    fill.setAttribute('cy', '25');
+    fill.setAttribute('r', String(SyncFloatingButton.RING_RADIUS));
+    fill.setAttribute('fill', 'none');
+    fill.setAttribute('stroke-width', '4');
+    fill.setAttribute('stroke-linecap', 'butt');
+    fill.style.strokeDasharray = String(SyncFloatingButton.RING_CIRCUMFERENCE);
+    fill.style.strokeDashoffset = String(SyncFloatingButton.RING_CIRCUMFERENCE);
+    svg.appendChild(track);
+    svg.appendChild(fill);
+    btn.appendChild(svg);
+    this.ringTrack = track;
+    this.ringFill = fill;
+
     // v6.3.0-alpha.1: 生命周期子元素
     // 图标包装（用于淡入淡出）
     const iconWrap = btn.createSpan('sync-icon-wrap');
@@ -492,6 +538,8 @@ export class SyncFloatingButton {
       this.iconWrap = null;
       this.progressText = null;
       this.checkIcon = null;
+      this.ringTrack = null;
+      this.ringFill = null;
       this.cleanup = null;
       this.containerEl = null;
     }
@@ -501,19 +549,17 @@ export class SyncFloatingButton {
 
   private buildBaseStyle(): string {
     return [
-      'width: 44px',
-      'height: 44px',
+      'width: 50px',
+      'height: 50px',
       'border-radius: 50%',
       'background: var(--background-secondary)',
       'border: 1px solid var(--background-modifier-border)',
-      'box-shadow: var(--shadow-l)',
       'display: flex',
       'align-items: center',
       'justify-content: center',
       'cursor: grab',
       'user-select: none',
       'color: var(--icon-color)',
-      'transition: box-shadow 0.2s ease, transform 0.15s ease, border-radius 0.15s ease',
     ].join(';');
   }
 
