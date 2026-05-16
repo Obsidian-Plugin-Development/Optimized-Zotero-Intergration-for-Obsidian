@@ -221,7 +221,7 @@ export class CitationEditModal extends Modal {
 
 	// ── 卡片渲染 ──
 
-	private renderCards() {
+	private renderCards(scrollToBottom = false) {
 		this.clearLoadingIntervals();
 		this.cardContainer.empty();
 
@@ -256,6 +256,13 @@ export class CitationEditModal extends Modal {
 		}
 
 		this.updateSaveButton();
+
+		// ★ 新增文献后自动滚动至底部，确保新卡片可见
+		if (scrollToBottom) {
+			requestAnimationFrame(() => {
+				this.cardContainer.scrollTop = this.cardContainer.scrollHeight;
+			});
+		}
 	}
 
 	/**
@@ -466,7 +473,7 @@ export class CitationEditModal extends Modal {
 		) as HTMLElement | null;
 		if (!placeholder) return;
 
-		const number = index + 1;
+		const number = this.startIndex + index;
 		const newCard = this.buildCardElement(index, key, number, item);
 		placeholder.replaceWith(newCard);
 	}
@@ -493,7 +500,7 @@ export class CitationEditModal extends Modal {
 					this.citeKeys.push(item.key);
 				}
 			}
-			this.renderCards();
+			this.renderCards(true);
 		} catch {
 			// 用户取消选择或 BBT 不可用
 		}
