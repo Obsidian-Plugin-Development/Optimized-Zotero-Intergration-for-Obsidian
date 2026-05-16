@@ -390,9 +390,6 @@
     line-height: 1.4;
     font-size: 13px;
 }
-.citation-popover .csl-left-margin {
-    margin-right: 0.5em !important;
-}
 .citation-popover .csl-entry:last-child,
 .citation-popover .csl-bib-body:last-child {
     margin-bottom: 0 !important;
@@ -429,6 +426,16 @@
 
 .citation-popover-btn-dim:hover {
     opacity: 0.7;
+}
+
+/* ── v6.1.0-alpha.1: CSL 序号悬挂缩进防错位 ── */
+.citation-popover .csl-entry {
+    align-items: baseline !important;
+}
+.citation-popover .csl-left-margin {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    margin-right: 0.5em !important;
 }
 
 /* ── v6.1 文末参考文献颜色修复 ── */

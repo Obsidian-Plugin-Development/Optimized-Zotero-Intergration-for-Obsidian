@@ -219,50 +219,49 @@ export class CitationPopoverManager {
 		// ── 标题栏：编辑按钮 ──
 		this.renderHeader(popover, target, citeKeys);
 
-		// ── 逐篇构建卡片（纯同步 DOM 操作）──
+		// ── v6.1.0-alpha.1: 上下卡片结构 + 横向 Action Bar ──
 
 		for (let i = 0; i < citeKeys.length; i++) {
 			const key = citeKeys[i];
 			const bibHtml = this.engine.getIndividualBibHtmlCached(key);
 			const meta = this.engine.getIndividualMetaCached(key);
 
-			// 卡片容器
+			// 卡片容器 — 上下结构，消除双栏并排留白
 			const card = popover.createDiv();
 			card.style.cssText = [
 				'display: flex',
-				'gap: 10px',
-				'align-items: flex-start',
+				'flex-direction: column',
+				'gap: 6px',
 				i < citeKeys.length - 1
 					? 'padding-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border); margin-bottom: 10px;'
 					: '',
 			].join(';');
 
-			// 左栏：参考文献 HTML（序号已校准为全局编号）
-			const left = card.createDiv();
-			left.style.cssText = 'flex: 1; min-width: 0; overflow-wrap: break-word;';
+			// 文献文本区域
+			const body = card.createDiv();
+			body.style.cssText = 'flex: 1; min-width: 0; overflow-wrap: break-word;';
 
 			if (bibHtml) {
-				const bibDiv = left.createDiv('csl-entry');
+				const bibDiv = body.createDiv('csl-entry');
 				const globalNum = this.engine.getNumber(key) || 1;
 				bibDiv.innerHTML = calibrateCitationNumber(bibHtml, globalNum);
 			} else {
-				// ★ Cache miss 降级：显示 citekey，后台静默拉取
-				left.setText(`@${key}`);
-				left.style.opacity = '0.55';
-				left.style.fontStyle = 'italic';
+				body.setText(`@${key}`);
+				body.style.opacity = '0.55';
+				body.style.fontStyle = 'italic';
 				this.engine.precacheAllBibs([key]);
 			}
 
-			// 右栏：操作按钮
-			const right = card.createDiv();
-			right.style.cssText =
-				'display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; align-items: center;';
+			// 横向操作按钮栏 — 紧凑排列于文本右下方
+			const actions = card.createDiv('citation-actions');
+			actions.style.cssText =
+				'display: flex; flex-direction: row; justify-content: flex-end; gap: 4px;';
 
-			this.renderNoteButton(right, key);
+			this.renderNoteButton(actions, key);
 			if (meta?.url || meta?.doi) {
-				this.renderLinkButton(right, meta);
+				this.renderLinkButton(actions, meta);
 			}
-			this.renderZoteroButton(right, key);
+			this.renderZoteroButton(actions, key);
 		}
 
 		// 挂载 → 定位 → 触发入场过渡

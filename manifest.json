@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.0.0",
+	"version": "6.1.0-alpha.1",
 	"minAppVersion": "1.1.1",
-	"description": "v6.0.0: 稳定版 — 一键导入文献、YAML Frontmatter 智能合并、行内引注自动渲染、悬浮操作按钮、参考文献同步",
+	"description": "v6.1.0-alpha.1: UI/UX 深度打磨 — 引注弹窗空间压实、CSL 防错位、编辑模态框复用、极简行内预览",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

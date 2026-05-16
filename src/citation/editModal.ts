@@ -1,5 +1,9 @@
 /**
- * v6.3 引注编辑模态框 — 在悬浮窗中点击编辑按钮后弹出
+ * v6.1.0-alpha.1 引注编辑/插入双模模态框
+ *
+ * 双模式复用同一个 Modal：
+ *   - 编辑模式（editRange 存在）：标签云展示已有 citekey，保存时 view.dispatch 精准替换原坐标
+ *   - 插入模式（editRange 为空）：标签云初始为空，保存时在光标处插入新引注
  *
  * 提供所见即所得 (WYSIWYG) 的引注编辑体验：
  *   - 标签云 (Tag Chips)：展示当前 citekey，每个带 × 删除按钮
@@ -40,8 +44,8 @@ export class CitationEditModal extends Modal {
 		app: ZoteroConnector['app'],
 		private readonly plugin: ZoteroConnector,
 		private readonly view: EditorView,
-		private readonly range: { from: number; to: number },
-		initialKeys: string[],
+		private readonly range?: { from: number; to: number },
+		initialKeys: string[] = [],
 	) {
 		super(app);
 		// 深拷贝，避免外部修改
@@ -65,7 +69,7 @@ export class CitationEditModal extends Modal {
 		].join(';');
 
 		const title = header.createEl('h3');
-		title.setText('编辑引注');
+		title.setText(this.range ? '编辑引注' : '插入引注');
 		title.style.cssText = 'margin: 0; font-size: 16px; font-weight: 600;';
 
 		// ── 标签云区域 ──
@@ -88,8 +92,6 @@ export class CitationEditModal extends Modal {
 			'border-radius: 8px',
 			'border: 1px solid var(--background-modifier-border)',
 		].join(';');
-
-		this.renderChips();
 
 		// ── 操作按钮区 ──
 		const actions = contentEl.createDiv();
@@ -174,6 +176,9 @@ export class CitationEditModal extends Modal {
 			this.close();
 			return false;
 		});
+
+		// ★ 所有 DOM 就绪后渲染 chips
+		this.renderChips();
 	}
 
 	onClose() {
@@ -279,30 +284,47 @@ export class CitationEditModal extends Modal {
 	// ── 保存 ──
 
 	private updateSaveButton() {
-		// 至少一个 citekey 才可保存
+		if (!this.saveBtn) return;
 		this.saveBtn.disabled = false;
 		this.saveBtn.style.opacity = '1';
 	}
 
 	/**
-	 * ★ 原子化源码替换
+	 * ★ 双模式保存
 	 *
-	 * 重组 Pandoc 语法（如 [@citeA; @citeNew]），
-	 * 通过 view.dispatch() 精准替换 [from, to) 范围内的原始文本。
-	 * 空数组 → 替换为空字符串 ""。
+	 * 编辑模式（range 存在）：重组 Pandoc 语法，view.dispatch 精准替换 [from, to) 范围。
+	 * 插入模式（range 为空）：在光标处插入新引注。
+	 * 空 citeKeys → 编辑模式替换为空串，插入模式不操作。
 	 */
 	private onSave() {
 		const newText = this.citeKeys.length > 0
 			? `[@${this.citeKeys.join('; @')}]`
 			: '';
 
-		this.view.dispatch({
-			changes: {
-				from: this.range.from,
-				to: this.range.to,
-				insert: newText,
-			},
-		});
+		if (this.range) {
+			// 编辑模式：替换原坐标区域
+			this.view.dispatch({
+				changes: {
+					from: this.range.from,
+					to: this.range.to,
+					insert: newText,
+				},
+			});
+		} else {
+			// 插入模式：光标处插入
+			if (!newText) {
+				this.close();
+				return;
+			}
+			const pos = this.view.state.selection.main.from;
+			this.view.dispatch({
+				changes: {
+					from: pos,
+					to: pos,
+					insert: newText,
+				},
+			});
+		}
 
 		this.close();
 	}
