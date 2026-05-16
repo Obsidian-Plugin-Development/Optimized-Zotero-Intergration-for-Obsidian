@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.3.1",
+	"version": "6.4.0",
 	"minAppVersion": "1.1.1",
-	"description": "v6.3.1: 视觉补间引擎 — 解耦真实性能与感知性能，最小动画生命周期 + 数字补间 + 三层互斥",
+	"description": "v6.4.0: HUD完全体 — SVG抗锯齿进度环 + 严格同心几何锁死 + 阴影重构 + 同步动效闭环",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true
