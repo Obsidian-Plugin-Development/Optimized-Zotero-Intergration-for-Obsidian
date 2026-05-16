@@ -333,6 +333,9 @@ export class CitationPopoverManager {
 
 			const range = { from: Number(fromStr), to: Number(toStr) };
 
+			// 计算起始序号：第一项在正文中的全局引注编号
+			const startIndex = this.engine.getNumber(citeKeys[0]) || 1;
+
 			// 关闭悬浮窗，打开编辑模态框
 			this.hide();
 			new CitationEditModal(
@@ -341,6 +344,7 @@ export class CitationPopoverManager {
 				view,
 				range,
 				citeKeys,
+				startIndex,
 			).open();
 		});
 	}

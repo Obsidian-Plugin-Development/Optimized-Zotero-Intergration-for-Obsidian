@@ -69,6 +69,7 @@ export class CitationEditModal extends Modal {
 	private cardContainer!: HTMLElement;
 	private saveBtn!: HTMLButtonElement;
 	private addBtn!: HTMLButtonElement;
+	private startIndex: number;
 	private loadingIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
 	constructor(
@@ -77,9 +78,11 @@ export class CitationEditModal extends Modal {
 		private readonly view: EditorView,
 		private readonly range?: { from: number; to: number },
 		initialKeys: string[] = [],
+		startIndex: number = 1,
 	) {
 		super(app);
 		this.citeKeys = [...initialKeys];
+		this.startIndex = startIndex;
 	}
 
 	onOpen() {
@@ -237,7 +240,7 @@ export class CitationEditModal extends Modal {
 		for (let i = 0; i < this.citeKeys.length; i++) {
 			const key = this.citeKeys[i];
 			const item = engine.getIndividualJsonCached(key);
-			const displayNumber = i + 1;
+			const displayNumber = this.startIndex + i;
 
 			if (item) {
 				this.renderCard(i, key, displayNumber, item);
