@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.1.0",
+	"version": "6.2.0",
 	"minAppVersion": "1.1.1",
-	"description": "v6.1.0: 引注弹窗空间压实、CSL 防错位、编辑模态框双模复用、参考文献区域无空行、引注坐标实时更新",
+	"description": "v6.2.0: 引注签名Diff防HUD误触发、跨文档签名隔离、首次打开基线建立",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

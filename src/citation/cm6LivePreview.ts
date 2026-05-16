@@ -26,7 +26,7 @@ import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
 import { updateCitationStore } from './citationStore';
 import type { CitationStore, CitePos } from './citationStore';
-import { markBibDirty } from './bibliographyWriter';
+import { markBibDirty, extractCitationSignature, getLastCitationSignature, setLastCitationSignature } from './bibliographyWriter';
 
 // ── 模块级闭包引用 ──
 let _engine: CitationEngine;
@@ -243,9 +243,17 @@ class CitationPluginValue implements PluginValue {
 			_engine.getCombinedBibliographyHtml(store.sortedUniqueKeys);
 		}
 
-		// ★ v7.1: 标记参考文献为 dirty（不再自动更新，由用户手动触发）
-		markBibDirty();
-		try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
+		// ★ v7.1: 引注签名 diff — 仅当 citekey 真正变化时才标记 dirty
+		const currentSignature = extractCitationSignature(docText);
+		const filePath = _plugin?.app?.workspace?.getActiveFile()?.path || '';
+		const cachedSignature = getLastCitationSignature(filePath);
+		if (cachedSignature === null) {
+			// 首次遇到该文档 → 建立基线签名，假设已同步
+			setLastCitationSignature(filePath, currentSignature);
+		} else if (currentSignature !== cachedSignature) {
+			markBibDirty();
+			try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
+		}
 
 		const positions = scanDocumentForCitations(docText);
 		if (positions.length === 0) {

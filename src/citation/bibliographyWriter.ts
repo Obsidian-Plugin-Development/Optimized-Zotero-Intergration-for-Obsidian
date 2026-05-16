@@ -21,6 +21,38 @@ import { EditorView } from '@codemirror/view';
 import type { CitationEngine } from './citationEngine';
 import { citationStore } from './citationStore';
 
+// ── 引注签名提取（防 HUD 误触发）──
+const CITE_PATTERN = /\[@([^\]]+)\]/g;
+
+/**
+ * 从文档文本中提取引注签名。
+ * 按文档位置顺序收集所有 citekey，用逗号连接。
+ * 签名一致表示引注未变，HUD 无需切换为 out-of-sync 状态。
+ */
+export function extractCitationSignature(text: string): string {
+	const keys: string[] = [];
+	let match: RegExpExecArray | null;
+	while ((match = CITE_PATTERN.exec(text)) !== null) {
+		const rawKeys = match[1]
+			.split(';')
+			.map(s => s.trim().replace(/^@/, ''))
+			.filter(Boolean);
+		keys.push(...rawKeys);
+	}
+	return keys.join(',');
+}
+
+/** 基于文件路径的引注签名缓存，防止跨文档污染 */
+const _signatureCache = new Map<string, string>();
+
+export function getLastCitationSignature(filePath: string): string | null {
+	return _signatureCache.has(filePath) ? _signatureCache.get(filePath)! : null;
+}
+
+export function setLastCitationSignature(filePath: string, sig: string) {
+	_signatureCache.set(filePath, sig);
+}
+
 // ── 模块级状态 ──
 let _bibEngine: CitationEngine;
 let _bibHeading = '参考文献';
@@ -210,7 +242,7 @@ function assembleEntries(positionSorted: string[]): string[] | null {
  * 场景 C — 有引注，已有标题，精确更新：
  *   安全区覆盖标题行末尾 \n，插入 \n列表\n\n（标题与列表间永无空行）。
  */
-export function updateBibliographyText(view: EditorView) {
+export function updateBibliographyText(view: EditorView, filePath?: string) {
 	const docText = view.state.doc.toString();
 	const headingPattern = buildHeadingPattern();
 	const headingMatch = headingPattern.exec(docText);
@@ -238,6 +270,7 @@ export function updateBibliographyText(view: EditorView) {
 		});
 
 		setBibDirty(false);
+		setLastCitationSignature(filePath || '', '');
 		return;
 	}
 
@@ -267,6 +300,7 @@ export function updateBibliographyText(view: EditorView) {
 		});
 
 		setBibDirty(false);
+		setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
 		return;
 	}
 
@@ -298,4 +332,5 @@ export function updateBibliographyText(view: EditorView) {
 
 	// 写入成功 → 标记为已同步
 	setBibDirty(false);
+	setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
 }

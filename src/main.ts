@@ -222,7 +222,8 @@ export default class ZoteroConnector extends Plugin {
           return;
         }
         try {
-          updateBibliographyText(view);
+          const filePath = this.app.workspace.getActiveFile()?.path;
+          updateBibliographyText(view, filePath);
           markBibClean();
           try { this.emitter.trigger('bibClean'); } catch { /* 静默 */ }
           new Notice('✅ ' + t('notice.bibliographyUpdated'), 3000);
