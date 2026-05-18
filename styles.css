@@ -495,25 +495,48 @@
     padding-top: 10px;
 }
 
-/* ★ Bug Fix #1: 历史锁定文献整体淡化 */
-.citation-edit-card.is-locked-citation {
-    opacity: 0.5;
-}
-
-.citation-edit-card.is-locked-citation .citation-edit-card-handle {
-    cursor: not-allowed !important;
-    opacity: 0.3;
-    pointer-events: none;
-}
-
+/* ★★★ v2.15: 历史锁定文献淡化 - 废除全局 opacity ★★★ */
 .citation-edit-card.is-locked-citation .citation-edit-card-body {
     pointer-events: none;
+}
+
+/* 精准淡化：只淡化文本元素，不影响图标 */
+.citation-edit-card.is-locked-citation .citation-edit-card-citekey,
+.citation-edit-card.is-locked-citation .citation-edit-card-title,
+.citation-edit-card.is-locked-citation .citation-edit-card-meta-minimal {
+    color: var(--text-muted) !important;
+    opacity: 0.6;
+}
+
+.citation-edit-card.is-locked-citation .citation-edit-card-number {
+    color: var(--text-faint) !important;
+    opacity: 0.5;
 }
 
 .citation-edit-card.is-locked-citation .citation-edit-card-delete {
     pointer-events: auto;
     cursor: pointer;
     opacity: 1;
+}
+
+/* ★★★ v2.15: 左侧跳转图标 - 紫色高亮，完全不受淡化影响 ★★★ */
+.citation-edit-card-jump-left {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--interactive-accent) !important;
+    opacity: 1 !important;
+    transition: all 0.15s ease;
+    pointer-events: auto !important;
+}
+
+.citation-edit-card-jump-left:hover {
+    transform: scale(1.15);
+    filter: brightness(1.2);
 }
 
 /* 拖拽手柄 */
@@ -566,6 +589,8 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    /* ★★★ 终极修复：确保子元素可以自由撑开 ★★★ */
+    overflow: visible;
 }
 
 /* Citekey 置顶（加粗，原始格式） */
@@ -597,11 +622,16 @@
 .citation-edit-card-title {
     font-size: 13px;
     color: var(--text-normal);
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-    word-break: break-word;
+    /* ★★★ 终极修复：彻底释放行数限制，完整展开标题 ★★★ */
+    display: block !important;
+    -webkit-line-clamp: none !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    word-break: break-word !important;
     line-height: 1.4;
+    max-width: none !important;
 }
 
 .citation-edit-card-journal {

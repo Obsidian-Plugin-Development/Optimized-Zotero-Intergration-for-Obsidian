@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.5.1",
+	"version": "6.5.3-alpha.1",
 	"minAppVersion": "1.1.1",
-	"description": "v6.5.1: 全域逻辑一致性与UI重构 — 首次出场拖拽限制 + 集合比对脏检查 + 即时锁定状态更新",
+	"description": "v6.5.3-alpha.1: UI 视觉与交互逻辑完美收官 — 左侧图标互斥渲染 + 紫色跳转图标 + 数据错位修复 + 标题完整展开",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

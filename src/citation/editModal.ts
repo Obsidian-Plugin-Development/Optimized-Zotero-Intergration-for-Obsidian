@@ -276,11 +276,11 @@ export class CitationEditModal extends Modal {
 		const engine = this.plugin.citationEngine;
 		const missingKeys: string[] = [];
 
-		// ★ 按全局序号排序显示（不改变 this.citeKeys 的顺序）
+		// ★★★ 绝杀数据错位 Bug：按全局序号排序，但保持 citekey 唯一锚点 ★★★
 		const sortedEntries = this.citeKeys
-			.map((key, index) => ({
+			.map((key, originalIndex) => ({
 				key,
-				index,
+				originalIndex, // 保留原始索引用于拖拽
 				globalNumber: engine.getNumber(key),
 			}))
 			.sort((a, b) => {
@@ -291,15 +291,17 @@ export class CitationEditModal extends Modal {
 				return a.globalNumber - b.globalNumber;
 			});
 
+		// ★★★ 关键修复：使用 key 作为唯一锚点获取元数据 ★★★
 		for (const entry of sortedEntries) {
-			const { key, index } = entry;
+			const { key, originalIndex } = entry;
+			// 通过 key 获取元数据，确保数据绑定正确
 			const item = engine.getIndividualJsonCached(key);
 
 			if (item) {
-				this.renderCard(index, key, 0, item);
+				this.renderCard(originalIndex, key, 0, item);
 			} else {
 				missingKeys.push(key);
-				this.renderPlaceholderCard(index, key, 0);
+				this.renderPlaceholderCard(originalIndex, key, 0);
 			}
 		}
 
@@ -337,15 +339,24 @@ export class CitationEditModal extends Modal {
 			card.addClass('is-locked-citation');
 		}
 
-		// 拖拽手柄
-		const handle = card.createSpan('citation-edit-card-handle');
-		setIcon(handle, 'grip-vertical');
-		if (!isLocked) {
+		// ★★★ 左侧图标：绝对互斥渲染 ★★★
+		// 历史文献 → 跳转图标 | 新文献 → 拖拽把手
+		if (isLocked) {
+			// 历史锁定文献：显示跳转图标
+			const jumpIcon = card.createSpan('citation-edit-card-jump-left');
+			setIcon(jumpIcon, 'navigation');
+			jumpIcon.title = '跳转到首次引用位置以修改';
+			jumpIcon.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.jumpToFirstCitation(key);
+			});
+		} else {
+			// 首次出场文献：显示拖拽把手
+			const handle = card.createSpan('citation-edit-card-handle');
+			setIcon(handle, 'grip-vertical');
 			handle.draggable = true;
 			this.attachDragEvents(handle, card, index, key);
-		} else {
-			handle.draggable = false;
-			handle.title = '此文献在之前已引用，不可拖拽';
 		}
 
 		// 编号徽章 - 使用全局序号
@@ -364,7 +375,12 @@ export class CitationEditModal extends Modal {
 
 		// 标题全显（自然换行）
 		const titleEl = body.createSpan('citation-edit-card-title');
-		titleEl.setText(cleanTitle(item, key));
+		const titleText = cleanTitle(item, key);
+		titleEl.setText(titleText);
+		// ★★★ v2.16: 添加原生 Tooltip，显示完整标题 ★★★
+		titleEl.title = titleText;
+		// ★★★ 终极修复：内联样式强制覆盖所有截断 ★★★
+		titleEl.style.cssText = 'white-space: normal !important; word-break: break-word !important; overflow: visible !important; text-overflow: clip !important; display: block !important; -webkit-line-clamp: unset !important;';
 
 		// 底层元数据（作者、年份、期刊）
 		const metaMinimal = body.createDiv('citation-edit-card-meta-minimal');
@@ -408,15 +424,23 @@ export class CitationEditModal extends Modal {
 			card.addClass('is-locked-citation');
 		}
 
-		// 拖拽手柄（占位卡片也可拖拽，除非锁定）
-		const handle = card.createSpan('citation-edit-card-handle');
-		setIcon(handle, 'grip-vertical');
-		if (!isLocked) {
+		// ★★★ 左侧图标：绝对互斥渲染 ★★★
+		if (isLocked) {
+			// 历史锁定文献：显示跳转图标
+			const jumpIcon = card.createSpan('citation-edit-card-jump-left');
+			setIcon(jumpIcon, 'navigation');
+			jumpIcon.title = '跳转到首次引用位置以修改';
+			jumpIcon.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.jumpToFirstCitation(key);
+			});
+		} else {
+			// 首次出场文献：显示拖拽把手
+			const handle = card.createSpan('citation-edit-card-handle');
+			setIcon(handle, 'grip-vertical');
 			handle.draggable = true;
 			this.attachDragEvents(handle, card, index, key);
-		} else {
-			handle.draggable = false;
-			handle.title = '此文献在之前已引用，不可拖拽';
 		}
 
 		// 编号徽章 - 使用全局序号
@@ -432,6 +456,7 @@ export class CitationEditModal extends Modal {
 		citekeyEl.setText(`[@${key}]`);
 		const loadingEl = body.createSpan('citation-edit-card-title');
 		loadingEl.setText('加载中...');
+		// ★★★ v2.16: 占位卡片暂时没有完整标题，不添加 Tooltip ★★★
 
 		// 删除按钮
 		const deleteBtn = card.createSpan('citation-edit-card-delete');
@@ -462,14 +487,23 @@ export class CitationEditModal extends Modal {
 			card.addClass('is-locked-citation');
 		}
 
-		const handle = card.createSpan('citation-edit-card-handle');
-		setIcon(handle, 'grip-vertical');
-		if (!isLocked) {
+		// ★★★ 左侧图标：绝对互斥渲染 ★★★
+		if (isLocked) {
+			// 历史锁定文献：显示跳转图标
+			const jumpIcon = card.createSpan('citation-edit-card-jump-left');
+			setIcon(jumpIcon, 'navigation');
+			jumpIcon.title = '跳转到首次引用位置以修改';
+			jumpIcon.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.jumpToFirstCitation(key);
+			});
+		} else {
+			// 首次出场文献：显示拖拽把手
+			const handle = card.createSpan('citation-edit-card-handle');
+			setIcon(handle, 'grip-vertical');
 			handle.draggable = true;
 			this.attachDragEvents(handle, card, index, key);
-		} else {
-			handle.draggable = false;
-			handle.title = '此文献在之前已引用，不可拖拽';
 		}
 
 		const badge = card.createSpan('citation-edit-card-number');
@@ -486,7 +520,12 @@ export class CitationEditModal extends Modal {
 
 		// 标题全显
 		const titleEl = body.createSpan('citation-edit-card-title');
-		titleEl.setText(cleanTitle(item, key));
+		const titleText = cleanTitle(item, key);
+		titleEl.setText(titleText);
+		// ★★★ v2.16: 添加原生 Tooltip，显示完整标题 ★★★
+		titleEl.title = titleText;
+		// ★★★ 终极修复：内联样式强制覆盖所有截断 ★★★
+		titleEl.style.cssText = 'white-space: normal !important; word-break: break-word !important; overflow: visible !important; text-overflow: clip !important; display: block !important; -webkit-line-clamp: unset !important;';
 
 		// 底层元数据
 		const metaMinimal = body.createDiv('citation-edit-card-meta-minimal');
@@ -627,6 +666,39 @@ export class CitationEditModal extends Modal {
 		// ★ 关键：删除后重新计算锁定状态（虽然通常不会改变）
 		this.computeLockedKeys();
 		this.renderCards();
+	}
+
+	/**
+	 * ★★★ 新增：跳转到首次引用位置 ★★★
+	 *
+	 * 关闭当前弹窗，将光标跳转到该文献在正文中第一次被引用的位置。
+	 */
+	private jumpToFirstCitation(key: string) {
+		// 查找该文献在文档中第一次出现的位置
+		const docText = this.view.state.doc.toString();
+		const pattern = /\[@([^\]]+)\]/g;
+		let match: RegExpExecArray | null;
+
+		while ((match = pattern.exec(docText)) !== null) {
+			const keys = match[1]
+				.split(';')
+				.map((s) => s.trim().replace(/^@/, ''))
+				.filter(Boolean);
+
+			if (keys.includes(key)) {
+				// 找到了！跳转到这个位置
+				const pos = match.index;
+				this.view.dispatch({
+					selection: { anchor: pos, head: pos },
+					scrollIntoView: true,
+				});
+				this.close();
+				return;
+			}
+		}
+
+		// 如果没找到（理论上不应该发生），显示提示
+		new Notice('未找到该文献的首次引用位置', 2000);
 	}
 
 	/**
