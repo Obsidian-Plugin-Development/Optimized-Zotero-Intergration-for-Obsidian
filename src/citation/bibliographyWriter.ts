@@ -29,6 +29,14 @@ const CITE_PATTERN = /\[@([^\]]+)\]/g;
  * 按文档位置顺序收集所有 citekey，用逗号连接。
  * 签名一致表示引注未变，HUD 无需切换为 out-of-sync 状态。
  */
+/**
+ * ★★★ Bug Fix #3: 改为集合比对（Set Equality），废除顺序比对 ★★★
+ *
+ * 提取文档中所有引注的 citekey 集合签名。
+ * 只要集合内容相同（不论顺序），就认为文档未变化。
+ *
+ * 实现：将所有 citekey 排序后再 join，确保相同集合生成相同签名。
+ */
 export function extractCitationSignature(text: string): string {
 	const keys: string[] = [];
 	let match: RegExpExecArray | null;
@@ -39,7 +47,11 @@ export function extractCitationSignature(text: string): string {
 			.filter(Boolean);
 		keys.push(...rawKeys);
 	}
-	return keys.join(',');
+
+	// ★ 关键修复：使用 Set 去重，然后排序，确保相同集合生成相同签名
+	// 这样 [@A; @B] 和 [@B; @A] 会生成相同的签名
+	const uniqueKeys = Array.from(new Set(keys)).sort();
+	return uniqueKeys.join(',');
 }
 
 /** 基于文件路径的引注签名缓存，防止跨文档污染 */

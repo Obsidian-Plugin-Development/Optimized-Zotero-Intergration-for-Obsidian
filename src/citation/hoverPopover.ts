@@ -182,7 +182,20 @@ export class CitationPopoverManager {
 	show(target: HTMLElement, citeKeys: string[]) {
 		// 二次确保旧弹窗已销毁（onMouseOver 已调用，此处防御）
 		this.destroyPopover();
-		this.currentKeys = citeKeys;
+
+		// ★★★ Bug Fix #3: 按全局序号排序显示 ★★★
+		// 确保详情弹窗中的文献按全局序号从小到大排列
+		const sortedKeys = [...citeKeys].sort((a, b) => {
+			const numA = this.engine.getNumber(a);
+			const numB = this.engine.getNumber(b);
+			// 序号为 0 的放最后
+			if (numA === 0 && numB === 0) return 0;
+			if (numA === 0) return 1;
+			if (numB === 0) return -1;
+			return numA - numB;
+		});
+
+		this.currentKeys = sortedKeys;
 
 		// 弹窗容器（初始透明，挂载后 CSS transition 淡入）
 		const popover = document.body.createDiv('citation-popover');
@@ -221,8 +234,9 @@ export class CitationPopoverManager {
 
 		// ── v6.1.0-alpha.1: 上下卡片结构 + 横向 Action Bar ──
 
-		for (let i = 0; i < citeKeys.length; i++) {
-			const key = citeKeys[i];
+		// ★★★ Bug Fix: 使用排序后的 this.currentKeys 而不是原始的 citeKeys ★★★
+		for (let i = 0; i < this.currentKeys.length; i++) {
+			const key = this.currentKeys[i];
 			const bibHtml = this.engine.getIndividualBibHtmlCached(key);
 			const meta = this.engine.getIndividualMetaCached(key);
 
@@ -232,7 +246,7 @@ export class CitationPopoverManager {
 				'display: flex',
 				'flex-direction: column',
 				'gap: 6px',
-				i < citeKeys.length - 1
+				i < this.currentKeys.length - 1
 					? 'padding-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border); margin-bottom: 10px;'
 					: '',
 			].join(';');

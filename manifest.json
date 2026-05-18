@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.5.0",
+	"version": "6.5.1",
 	"minAppVersion": "1.1.1",
-	"description": "v6.5.0: 开卷静默Diff拦截器 — 引注签名缓存 + 零延迟本地扫描 + 精准分支路由，阅读零打扰",
+	"description": "v6.5.1: 全域逻辑一致性与UI重构 — 首次出场拖拽限制 + 集合比对脏检查 + 即时锁定状态更新",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

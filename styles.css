@@ -495,6 +495,27 @@
     padding-top: 10px;
 }
 
+/* ★ Bug Fix #1: 历史锁定文献整体淡化 */
+.citation-edit-card.is-locked-citation {
+    opacity: 0.5;
+}
+
+.citation-edit-card.is-locked-citation .citation-edit-card-handle {
+    cursor: not-allowed !important;
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.citation-edit-card.is-locked-citation .citation-edit-card-body {
+    pointer-events: none;
+}
+
+.citation-edit-card.is-locked-citation .citation-edit-card-delete {
+    pointer-events: auto;
+    cursor: pointer;
+    opacity: 1;
+}
+
 /* 拖拽手柄 */
 .citation-edit-card-handle {
     cursor: grab;
@@ -514,7 +535,7 @@
     cursor: grabbing;
 }
 
-/* 编号徽章 */
+/* 编号徽章 - 极简纯文本版本 */
 .citation-edit-card-number {
     flex-shrink: 0;
     display: inline-flex;
@@ -523,12 +544,19 @@
     min-width: 28px;
     height: 24px;
     padding: 0 6px;
-    border-radius: 12px;
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-    font-size: 11px;
-    font-weight: 700;
+    background: transparent;
+    color: var(--text-normal);
+    font-size: 12px;
+    font-weight: 400;
     line-height: 1;
+}
+
+/* v6.5.2: 历史锁定文献的 Badge 样式 */
+.citation-edit-card-number.is-locked {
+    background: transparent;
+    color: var(--text-muted);
+    opacity: 0.6;
+    cursor: help;
 }
 
 /* 元数据主体 */
@@ -537,7 +565,16 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
+}
+
+/* Citekey 置顶（加粗，原始格式） */
+.citation-edit-card-citekey {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-normal);
+    margin-bottom: 2px;
 }
 
 .citation-edit-card-meta {
@@ -558,17 +595,27 @@
 }
 
 .citation-edit-card-title {
-    font-size: 12px;
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 13px;
+    color: var(--text-normal);
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.4;
 }
 
 .citation-edit-card-journal {
     font-size: 11px;
     color: var(--text-faint);
     font-style: italic;
+}
+
+/* 底层元数据（次要信息，淡化） */
+.citation-edit-card-meta-minimal {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.3;
 }
 
 /* 删除按钮 */
