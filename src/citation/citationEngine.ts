@@ -14,6 +14,17 @@ import type { CitationCacheEntry, CitationData, DocumentScanResult } from './cit
 const CACHE_TTL_MS = 5 * 60 * 1000;
 /** BBT 批量解析防抖延迟 */
 const RESOLVE_DEBOUNCE_MS = 300;
+/** v7.3: per-key 缓存上限（LRU 驱逐） */
+const MAX_PER_KEY_CACHE = 200;
+/** v7.3: combinedBib 缓存上限 */
+const MAX_COMBINED_CACHE = 50;
+
+function enforceCacheLimit(map: Map<string, any>, maxSize: number) {
+	if (map.size > maxSize) {
+		const oldest = map.keys().next().value;
+		if (oldest !== undefined) map.delete(oldest);
+	}
+}
 
 /**
  * v6.2 从 Zotero 条目 JSON 中鲁棒提取 URL 和 DOI。
@@ -267,7 +278,7 @@ export class CitationEngine {
 		try {
 			const html = await getBibFromCiteKey(citeKey, database, 'nature', 'html', true);
 			const result = html || '';
-			this.individualBibHtmlCache.set(key, result);
+			this.individualBibHtmlCache.set(key, result); enforceCacheLimit(this.individualBibHtmlCache, MAX_PER_KEY_CACHE);
 			return result;
 		} catch {
 			this.individualBibHtmlCache.set(key, '');
@@ -313,11 +324,11 @@ export class CitationEngine {
 			const items: any[] = Array.isArray(raw) ? raw : [];
 			const item = items[0] || {};
 			const meta = extractUrl(item);
-			this.individualMetaCache.set(key, meta);
+			this.individualMetaCache.set(key, meta); enforceCacheLimit(this.individualMetaCache, MAX_PER_KEY_CACHE);
 			return meta;
 		} catch {
 			const empty = { doi: undefined, url: undefined };
-			this.individualMetaCache.set(key, empty);
+			this.individualMetaCache.set(key, empty); enforceCacheLimit(this.individualMetaCache, MAX_PER_KEY_CACHE);
 			return empty;
 		}
 	}
@@ -338,13 +349,23 @@ export class CitationEngine {
 	 * ★ 异步 fire‑and‑forget：调用方不等待、不阻塞主线程。
 	 * ★ 自动跳过已缓存 key，仅拉取缺失项。
 	 */
-	precacheAllBibs(keys: string[]): void {
+	/**
+	 * v7.3: 可选 onJsonReady 回调 — 当 key 的 CSL-JSON 缓存就绪时触发。
+	 * 供 editModal 事件驱动更新卡片，替代 200ms 轮询。
+	 */
+	precacheAllBibs(keys: string[], onJsonReady?: (key: string) => void): void {
 		const unique = [...new Set(keys)].filter(Boolean);
 		if (unique.length === 0) return;
 
-		const uncachedBib = unique.filter(k => this.individualBibHtmlCache.get(k) === undefined);
-		const uncachedMeta = unique.filter(k => !this.individualMetaCache.has(k));
-		const uncachedJson = unique.filter(k => !this.individualJsonCache.has(k));
+		// ★ v7.3: 单次遍历分类未缓存 key
+		const uncachedBib: string[] = [];
+		const uncachedMeta: string[] = [];
+		const uncachedJson: string[] = [];
+		for (const k of unique) {
+			if (this.individualBibHtmlCache.get(k) === undefined) uncachedBib.push(k);
+			if (!this.individualMetaCache.has(k)) uncachedMeta.push(k);
+			if (!this.individualJsonCache.has(k)) uncachedJson.push(k);
+		}
 
 		if (uncachedBib.length === 0 && uncachedMeta.length === 0 && uncachedJson.length === 0) return;
 
@@ -355,55 +376,60 @@ export class CitationEngine {
 				port: (this.plugin.settings as any).port,
 			};
 
-			// 逐篇拉取 bib HTML（Nature 格式，独立请求，确保每篇文献 HTML 隔离）
-			for (const key of uncachedBib) {
-				try {
-					const html = await getBibFromCiteKey(
-						{ key, library: 1 }, database, 'nature', 'html', true,
-					);
-					this.individualBibHtmlCache.set(key, html || '');
-				} catch {
-					this.individualBibHtmlCache.set(key, '');
-				}
-			}
+			// ★ v7.3: 并发请求 bib HTML + JSON 元数据
+			await Promise.all([
+				// bib HTML：并发入队（ZQueue maxConcurrent=1 串行执行，但消除逐篇 await 开销）
+				(async () => {
+					if (uncachedBib.length === 0) return;
+					const bibPromises = uncachedBib.map(async (key) => {
+						try {
+							const html = await getBibFromCiteKey(
+								{ key, library: 1 }, database, 'nature', 'html', true,
+							);
+							this.individualBibHtmlCache.set(key, html || '');
+						} catch {
+							this.individualBibHtmlCache.set(key, '');
+						}
+					});
+					await Promise.all(bibPromises);
+				})(),
 
-			// v7.0: 批量拉取 CSL-JSON 元数据（供 bibliographyWriter 本地组装）
-			if (uncachedJson.length > 0) {
-				try {
-					const citeKeyObjs: CiteKey[] = uncachedJson.map(k => ({ key: k, library: 1 }));
-					const raw = await getItemJSONFromCiteKeys(citeKeyObjs, database, 1, true);
-					const items: any[] = Array.isArray(raw) ? raw : [];
-					for (let i = 0; i < uncachedJson.length; i++) {
-						const key = uncachedJson[i];
-						const item = items[i] || {};
-						if (item && Object.keys(item).length > 0) {
-							this.individualJsonCache.set(key, item);
+				// ★ v7.3: JSON + Meta 合并为一次 BBT 批量调用
+				(async () => {
+					const jsonOrMetaKeys = [...new Set([...uncachedJson, ...uncachedMeta])];
+					if (jsonOrMetaKeys.length === 0) return;
+					try {
+						const citeKeyObjs: CiteKey[] = jsonOrMetaKeys.map(k => ({ key: k, library: 1 }));
+						const raw = await getItemJSONFromCiteKeys(citeKeyObjs, database, 1, true);
+						const items: any[] = Array.isArray(raw) ? raw : [];
+						// 建立 key → index 查找表
+						const keyIndex = new Map<string, number>();
+						for (let i = 0; i < jsonOrMetaKeys.length; i++) {
+							keyIndex.set(jsonOrMetaKeys[i], i);
+						}
+						for (const key of jsonOrMetaKeys) {
+							const idx = keyIndex.get(key)!;
+							const item = items[idx] || {};
+							// v7.0: 缓存 CSL-JSON 元数据
+							if (uncachedJson.includes(key) && Object.keys(item).length > 0) {
+								this.individualJsonCache.set(key, item);
+								// ★ v7.3: 通知 editModal 数据就绪
+								onJsonReady?.(key);
+							}
+							// v6.2: 缓存 DOI/URL 元数据
+							if (uncachedMeta.includes(key)) {
+								this.individualMetaCache.set(key, extractUrl(item)); enforceCacheLimit(this.individualMetaCache, MAX_PER_KEY_CACHE);
+							}
+						}
+					} catch {
+						for (const key of uncachedMeta) {
+							if (!this.individualMetaCache.has(key)) {
+								this.individualMetaCache.set(key, { doi: undefined, url: undefined }); enforceCacheLimit(this.individualMetaCache, MAX_PER_KEY_CACHE);
+							}
 						}
 					}
-				} catch {
-					// 静默失败
-				}
-			}
-
-			// 批量拉取元数据（DOI/URL — 一次 BBT 调用覆盖所有 key，高效）
-			if (uncachedMeta.length > 0) {
-				try {
-					const citeKeyObjs: CiteKey[] = uncachedMeta.map(k => ({ key: k, library: 1 }));
-					const raw = await getItemJSONFromCiteKeys(citeKeyObjs, database, 1, true);
-					const items: any[] = Array.isArray(raw) ? raw : [];
-					for (let i = 0; i < uncachedMeta.length; i++) {
-						const key = uncachedMeta[i];
-						const item = items[i] || {};
-						this.individualMetaCache.set(key, extractUrl(item));
-					}
-				} catch {
-					for (const key of uncachedMeta) {
-						if (!this.individualMetaCache.has(key)) {
-							this.individualMetaCache.set(key, { doi: undefined, url: undefined });
-						}
-					}
-				}
-			}
+				})(),
+			]);
 		})().catch(() => {}); // 静默处理所有异常
 		}
 
@@ -436,11 +462,11 @@ export class CitationEngine {
 				const cleaned = (html || '')
 					.replace(/color\s*:\s*[^;>"]+[;>"]?\s*/gi, '')
 					.replace(/opacity\s*:\s*[^;>"]+[;>"]?\s*/gi, '');
-				this.combinedBibCache.set(cacheKey, cleaned);
+				this.combinedBibCache.set(cacheKey, cleaned); enforceCacheLimit(this.combinedBibCache, MAX_COMBINED_CACHE);
 				return cleaned;
 			} catch {
 				const fallback = '';
-				this.combinedBibCache.set(cacheKey, fallback);
+				this.combinedBibCache.set(cacheKey, fallback); enforceCacheLimit(this.combinedBibCache, MAX_COMBINED_CACHE);
 				return fallback;
 			}
 		}

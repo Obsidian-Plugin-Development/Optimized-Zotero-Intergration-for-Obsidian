@@ -15,6 +15,24 @@ import { getActiveEditorView } from './cm6LivePreview';
 
 const HIDE_DELAY_MS = 300;
 
+// ── v7.3: DOMParser 模块级单例复用 ──
+const _sharedDOMParser = new DOMParser();
+
+// ── v7.3: vault getFiles() 缓存 ──
+let _cachedFiles: TFile[] | null = null;
+let _cachedFilesAt = 0;
+const FILES_CACHE_TTL_MS = 30_000; // 30 秒
+
+function getVaultFilesCached(plugin: ZoteroConnector): TFile[] {
+	const now = Date.now();
+	if (_cachedFiles && (now - _cachedFilesAt) < FILES_CACHE_TTL_MS) {
+		return _cachedFiles;
+	}
+	_cachedFiles = plugin.app.vault.getFiles();
+	_cachedFilesAt = now;
+	return _cachedFiles;
+}
+
 // ── DOM 级序号校准 ──
 
 /**
@@ -28,12 +46,13 @@ const HIDE_DELAY_MS = 300;
  *   3. 正文首部 text node — 暴力正则匹配首处编号模式
  *
  * 仅替换首次出现，避免误伤文献标题/日期中的数字 1。
+ *
+ * ★ v7.3: 使用模块级 DOMParser 单例，避免每次调用 new DOMParser()
  */
 function calibrateCitationNumber(html: string, actualNumber: number): string {
 	if (!html || actualNumber <= 1) return html;
 
-	const parser = new DOMParser();
-	const doc = parser.parseFromString(html, 'text/html');
+	const doc = _sharedDOMParser.parseFromString(html, 'text/html');
 
 	// 1. CSL left-margin 容器：<div class="csl-left-margin">[1]</div>
 	const leftMargin = doc.querySelector('.csl-left-margin');
@@ -377,7 +396,7 @@ export class CitationPopoverManager {
 	 */
 	private renderNoteButton(container: HTMLElement, key: string) {
 		const rootDir = (this.plugin.settings as any).baseStorageFolder || '';
-		const allFiles = this.plugin.app.vault.getFiles();
+		const allFiles = getVaultFilesCached(this.plugin);
 		const targetName = `${key}.md`;
 
 		const noteFile = allFiles.find((file) => {

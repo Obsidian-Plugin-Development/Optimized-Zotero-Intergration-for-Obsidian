@@ -39,8 +39,8 @@ async function loadGetCiteKeys() {
 	return _getCiteKeys;
 }
 
-const POLL_INTERVAL_MS = 200;
-const MAX_POLL_TIME_MS = 15000;
+/** v7.3: 元数据加载超时（事件驱动 + 兜底定时器） */
+const METADATA_TIMEOUT_MS = 15000;
 
 /**
  * 从 CSL-JSON 条目提取第一作者（纯文本，剥离标记字符）。
@@ -69,7 +69,7 @@ export class CitationEditModal extends Modal {
 	private saveBtn!: HTMLButtonElement;
 	private addBtn!: HTMLButtonElement;
 	private startIndex: number;
-	private loadingIntervals = new Map<string, ReturnType<typeof setInterval>>();
+	private loadingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 	/** 记录哪些 citekey 是历史引用（在当前编辑位置之前已出现过） */
 	private lockedKeys = new Set<string>();
 
@@ -243,24 +243,24 @@ export class CitationEditModal extends Modal {
 	}
 
 	onClose() {
-		this.clearLoadingIntervals();
+		this.clearLoadingTimeouts();
 		const { contentEl } = this;
 		contentEl.empty();
 	}
 
-	// ── 轮询清理 ──
+	// ── 超时清理 ──
 
-	private clearLoadingIntervals() {
-		for (const id of this.loadingIntervals.values()) {
-			clearInterval(id);
+	private clearLoadingTimeouts() {
+		for (const id of this.loadingTimeouts.values()) {
+			clearTimeout(id);
 		}
-		this.loadingIntervals.clear();
+		this.loadingTimeouts.clear();
 	}
 
 	// ── 卡片渲染 ──
 
 	private renderCards(scrollToBottom = false) {
-		this.clearLoadingIntervals();
+		this.clearLoadingTimeouts();
 		this.cardContainer.empty();
 
 		if (this.citeKeys.length === 0) {
@@ -305,8 +305,24 @@ export class CitationEditModal extends Modal {
 		}
 
 		if (missingKeys.length > 0) {
-			engine.precacheAllBibs(missingKeys);
-			this.startPollingForMetadata(missingKeys);
+			// ★ v7.3: 事件驱动替代 200ms 轮询
+			engine.precacheAllBibs(missingKeys, (key: string) => {
+				const item = engine.getIndividualJsonCached(key);
+				if (item) {
+					this.updateSingleCard(key, item);
+					const tid = this.loadingTimeouts.get(key);
+					if (tid) { clearTimeout(tid); this.loadingTimeouts.delete(key); }
+				}
+			});
+			// 兜底超时
+			for (const key of missingKeys) {
+				if (!this.loadingTimeouts.has(key)) {
+					const tid = setTimeout(() => {
+						this.loadingTimeouts.delete(key);
+					}, METADATA_TIMEOUT_MS);
+					this.loadingTimeouts.set(key, tid);
+				}
+			}
 		}
 
 		this.updateSaveButton();
@@ -606,33 +622,7 @@ export class CitationEditModal extends Modal {
 		});
 	}
 
-	// ── 异步元数据轮询 ──
 
-	private startPollingForMetadata(keys: string[]) {
-		const engine = this.plugin.citationEngine;
-		const startTime = Date.now();
-
-		for (const key of keys) {
-			// 跳过已经在轮询中的 key
-			if (this.loadingIntervals.has(key)) continue;
-
-			const intervalId = setInterval(() => {
-				const item = engine.getIndividualJsonCached(key);
-				if (item) {
-					clearInterval(intervalId);
-					this.loadingIntervals.delete(key);
-					this.updateSingleCard(key, item);
-					return;
-				}
-				if (Date.now() - startTime > MAX_POLL_TIME_MS) {
-					clearInterval(intervalId);
-					this.loadingIntervals.delete(key);
-				}
-			}, POLL_INTERVAL_MS);
-
-			this.loadingIntervals.set(key, intervalId);
-		}
-	}
 
 	/**
 	 * 单个卡片更新：用富卡片 DOM 替换占位卡片。

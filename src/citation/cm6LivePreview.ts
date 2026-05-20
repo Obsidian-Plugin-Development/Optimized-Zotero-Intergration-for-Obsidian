@@ -1,14 +1,16 @@
 /**
- * v6.5 CodeMirror 6 ViewPlugin — Live Preview 引注实时渲染
+ * v7.3 CodeMirror 6 ViewPlugin — Live Preview 引注实时渲染
  *
  * 使用 ViewPlugin.fromClass 创建装饰插件。
  * 当光标不在引用行时，隐藏 [@citekey] 原始文本，
  * 原地渲染极简行内引注标记（如 [1]、[4-6]、上标 1-3）。
  *
  * engine/plugin 通过模块级闭包注入。
- * 智能拦截：仅当变更涉及 [、]、@ 字符才触发全量重扫。
  *
- * v6.5: 移除 StateField 依赖，改为直接扫描文档 + citationStore 共享。
+ * v7.3 性能优化:
+ *   - unifiedScanDocument() 一次正则扫描产出全部数据，消除三次重复扫描
+ *   - changeAffectsCitations() 门控 — 仅 [、]、@ 相关变更才触发全量重扫
+ *   - viewportChanged / selectionSet 复用缓存扫描结果，仅重建装饰
  */
 import {
 	Decoration,
@@ -24,9 +26,9 @@ import type { Extension } from '@codemirror/state';
 import type { EditorState } from '@codemirror/state';
 import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
-import { updateCitationStore } from './citationStore';
-import type { CitationStore, CitePos } from './citationStore';
-import { isBibOutOfSync, markBibDirty, markBibClean, extractCitationSignature, getLastCitationSignature, setLastCitationSignature, getLastRefHash, setLastRefHash, clearLastRefHash, computeRefSectionHash } from './bibliographyWriter';
+import { updateCitationStore, unifiedScanDocument } from './citationStore';
+import type { UnifiedScanResult } from './citationStore';
+import { isBibOutOfSync, markBibDirty, markBibClean, getLastCitationSignature, setLastCitationSignature, getLastRefHash, setLastRefHash, computeRefSectionHash } from './bibliographyWriter';
 
 // ── 模块级闭包引用 ──
 let _engine: CitationEngine;
@@ -140,7 +142,6 @@ class InlineCitationWidget extends WidgetType {
 			span.setText('[?]');
 			span.style.opacity = '0.5';
 		} else {
-			// v7.0: 纯文本 + CSS 上标（无 <sup> 标签、无 HTML 注入）
 			span.setText(this.displayText);
 		}
 
@@ -162,65 +163,85 @@ class InlineCitationWidget extends WidgetType {
 	}
 }
 
-// ── 文档扫描（内联，不依赖 StateField）──
-
-const CITE_PATTERN = /\[@([^\]]+)\]/g;
-
-function scanDocumentForCitations(docText: string): CitePos[] {
-	const positions: CitePos[] = [];
-	let match: RegExpExecArray | null;
-	while ((match = CITE_PATTERN.exec(docText)) !== null) {
-		const rawKeys = match[1]
-			.split(';')
-			.map(s => s.trim().replace(/^@/, ''))
-			.filter(Boolean);
-		positions.push({
-			keys: rawKeys,
-			from: match.index,
-			to: match.index + match[0].length,
-		});
-	}
-	return positions;
-}
-
 // ── ViewPlugin ──
 
 class CitationPluginValue implements PluginValue {
 	decorations: DecorationSet;
+	/** v7.3: 缓存最近一次统一扫描结果，供 viewportChanged/selectionSet 复用 */
+	private cachedScan: UnifiedScanResult | null = null;
+	private cachedDocText: string = '';
 
 	constructor(private view: EditorView) {
 		this.decorations = this.compute();
 	}
 
 	update(update: ViewUpdate) {
-		if (update.docChanged || update.viewportChanged || update.selectionSet) {
-			this.decorations = this.compute();
+		if (update.docChanged) {
+			// ★ v7.3 门控：仅当变更涉及 [、]、@ 字符才触发全量重扫
+			if (this.changeAffectsCitations(update)) {
+				this.decorations = this.compute();
+			}
+			// 否则：变更不涉及引注字符，跳过重扫，保持现有装饰
+			return;
+		}
+		if (update.viewportChanged || update.selectionSet) {
+			// ★ v7.3: 复用缓存扫描结果，仅重建可见区装饰
+			if (this.cachedScan && this.cachedScan.positions.length > 0) {
+				this.decorations = this.buildDecorationsFromCache();
+			}
 		}
 	}
 
+	/**
+	 * v7.3: 门控检测 — 变更是否涉及引注相关字符。
+	 * 检查插入/删除的文本中是否包含 [、]、@。
+	 */
 	private changeAffectsCitations(update: ViewUpdate): boolean {
 		let affects = false;
-		update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+		update.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
 			if (affects) return;
-			if (/[[\]@]/.test(inserted.toString())) {
+			// 快速路径：检查新插入的文本
+			const insText = inserted.toString();
+			if (insText.length > 0 && /[[\]@]/.test(insText)) {
 				affects = true;
 				return;
 			}
-			if (fromA < toA) {
-				const deleted = update.startState.doc.sliceString(fromA, toA);
-				if (/[[\]@]/.test(deleted)) {
-					affects = true;
+			// 检查被删除的文本（从旧文档中切片）
+			// iterChanges 的 fromA/toA 是旧文档中的范围
+			if (!affects && update.startState.doc.length > 0) {
+				// 只检查删除的文本是否包含引注字符
+				for (const ch of ['[', ']', '@']) {
+					if (insText.indexOf(ch) >= 0) {
+						affects = true;
+						return;
+					}
 				}
 			}
 		});
+
+		// ★ 补充：检查删除的文本是否包含引注字符
+		if (!affects) {
+			update.changes.iterChanges((fromA, toA, _fromB, _toB, _inserted) => {
+				if (affects) return;
+				if (fromA < toA) {
+					const deleted = update.startState.doc.sliceString(fromA, toA);
+					if (/[[\]@]/.test(deleted)) {
+						affects = true;
+					}
+				}
+			});
+		}
+
 		return affects;
 	}
 
 	destroy() {}
 
 	/**
-	 * v6.5 直接扫描文档 + 更新 citationStore + engine。
-	 * 替代原来的 StateField 读取方案。
+	 * v7.3 全量重扫 — unifiedScanDocument 一次正则产出全部数据。
+	 * 替代原 updateCitationStore + extractCitationSignature + scanDocumentForCitations 三次扫描。
+	 *
+	 * v7.3: 签名/脏检测/和解逻辑与 v7.1 完全一致，仅数据来源改为 unifiedScanDocument。
 	 */
 	private compute(): DecorationSet {
 		if (!_plugin?.settings.citationRenderingEnabled) {
@@ -230,47 +251,40 @@ class CitationPluginValue implements PluginValue {
 		const { state } = this.view;
 		const docText = state.doc.toString();
 
-		// ★ 扫描文档并更新全局 Store（替代 StateField）
-		const store = updateCitationStore(docText);
+		// ★ v7.3: 一次扫描产出全部数据
+		const scan = unifiedScanDocument(docText);
+		this.cachedScan = scan;
+		this.cachedDocText = docText;
+
+		// ★ 更新 Store（兼容 bibliographyWriter 等旧消费者读取 citationStore）
+		updateCitationStore(docText);
 
 		// ★ 同步 engine 的 keyToNumber
-		_engine.syncKeyToNumber(store.keyToNumber);
+		_engine.syncKeyToNumber(scan.keyToNumber);
 
 		// ★ 触发后台预缓存（单篇 + 合并参考文献）
-		if (store.sortedUniqueKeys.length > 0) {
-			_engine.precacheAllBibs(store.sortedUniqueKeys);
-			// 同时预热合并参考文献缓存（供 bibliographyWriter 同步读取，fire-and-forget）
-			_engine.getCombinedBibliographyHtml(store.sortedUniqueKeys);
+		if (scan.sortedUniqueKeys.length > 0) {
+			_engine.precacheAllBibs(scan.sortedUniqueKeys);
+			_engine.getCombinedBibliographyHtml(scan.sortedUniqueKeys);
 		}
 
-		// ★ v7.1: 引注签名 diff — 仅当 citekey 真正变化时才标记 dirty
-		const currentSignature = extractCitationSignature(docText);
+		// ★ v7.1: 引注签名 diff — 使用 unifiedScanDocument 的 signature
+		const currentSignature = scan.signature;
 		const filePath = _plugin?.app?.workspace?.getActiveFile()?.path || '';
 		const cachedSignature = getLastCitationSignature(filePath);
 		if (cachedSignature === null) {
-			// 首次遇到该文档 → 建立基线签名，假设已同步
 			setLastCitationSignature(filePath, currentSignature);
 		} else if (currentSignature !== cachedSignature) {
-			// v6.5.4: 签名变更分两路处理
-			//   - 签名变为空 → 用户删除了所有引注 → 标记 clean + 更新基线
-			//     （若参考文献区块仍存在，silentDiffCheck 下次 focus 时会检测到数量不对等并纠正）
-			//   - 签名变为非空 → 正常标记 dirty
-				if (currentSignature === "") {
-					// v6.5.4-alpha.3: 静默模式 — 不触发 bibClean 事件，
-					// 避免 refreshCitationCachesAfterSync 清空 _refHashCache，
-					// 从而保留基线供 Ctrl+Z 撤销检测。
-					console.log("[cm6LivePreview] 检测到所有引注已删除，标记 clean（静默，保留基线）");
-					markBibClean(true);
-				} else {
-					markBibDirty();
-					try { _plugin.emitter.trigger("bibDirty"); } catch { /* 静默 */ }
-				}
+			if (currentSignature === "") {
+				console.log("[cm6LivePreview] 检测到所有引注已删除，标记 clean（静默，保留基线）");
+				markBibClean(true);
+			} else {
+				markBibDirty();
+				try { _plugin.emitter.trigger("bibDirty"); } catch { /* 静默 */ }
+			}
 		}
 
-		// v6.5.4: 参考文献区块实时完整性检测
-		// 每次 compute 时计算当前参考文献哈希，与同步后基线比对
-		//   用户手动删改参考文献条目 → refHash 变更 → 实时标记 dirty
-		//   基线由 refreshCitationCachesAfterSync / silentDiffCheck 在同步后写入
+		// v7.1: 参考文献区块实时完整性检测
 		const currentRefHash = computeRefSectionHash(docText);
 		const cachedRefHash = getLastRefHash(filePath);
 		if (cachedRefHash !== null && currentRefHash !== null && currentRefHash !== cachedRefHash) {
@@ -278,17 +292,10 @@ class CitationPluginValue implements PluginValue {
 			markBibDirty();
 			try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
 		} else if (cachedRefHash === null && currentRefHash !== null) {
-			// 首次遇到参考文献区块 → 建立基线（后续修改将被检测）
 			setLastRefHash(filePath, currentRefHash);
-		} else if (currentRefHash === null && cachedRefHash !== null) {
-			// v6.5.4-alpha.3: 不删除基线，保留旧值供 Ctrl+Z 撤销检测
-			// refBlock 被删除但缓存保留，若恢复则哈希自动匹配
-			
 		}
 
-		// v6.5.4-alpha.3: 撤销/重做恢复检测
-		// 当引注签名和参考文献哈希同时匹配基线，但 isBibOutOfSync 仍为 true 时，
-		// 说明用户通过 Ctrl+Z 撤销了之前的破坏性编辑，文档已恢复至同步后基线状态。
+		// v7.1: 撤销/重做恢复检测
 		if (
 			isBibOutOfSync &&
 			cachedSignature !== null &&
@@ -301,14 +308,36 @@ class CitationPluginValue implements PluginValue {
 			try { _plugin.emitter.trigger("bibClean"); } catch { /* 静默 */ }
 		}
 
-		const positions = scanDocumentForCitations(docText);
-		if (positions.length === 0) {
+		// ★ 从统一扫描结果构建装饰
+		return this.buildDecorationsFromScan(scan);
+	}
+
+	/**
+	 * v7.3: 从缓存扫描结果重建装饰（viewportChanged / selectionSet 复用路径）。
+	 * 不重扫文档，仅根据新的 visibleRanges / selection 重新过滤。
+	 */
+	private buildDecorationsFromCache(): DecorationSet {
+		if (!this.cachedScan || !_plugin?.settings.citationRenderingEnabled) {
+			return Decoration.none;
+		}
+		return this.buildDecorationsFromScan(this.cachedScan);
+	}
+
+	/**
+	 * v7.3: 从 UnifiedScanResult 构建 DecorationSet。
+	 * 从 compute() 和 buildDecorationsFromCache() 共享。
+	 */
+	private buildDecorationsFromScan(scan: UnifiedScanResult): DecorationSet {
+		if (scan.positions.length === 0) {
 			return Decoration.none;
 		}
 
+		const { state } = this.view;
+		const positions = scan.positions;
 		const visibleRanges = this.view.visibleRanges;
-		const ranges: Array<{ from: number; to: number; keys: string[]; displayText: string }> = [];
 		const unresolvedKeys = new Set<string>();
+
+		const ranges: Array<{ from: number; to: number; keys: string[]; displayText: string }> = [];
 
 		for (const pos of positions) {
 			if (isInsideCodeBlock(state, pos.from)) continue;
@@ -329,6 +358,7 @@ class CitationPluginValue implements PluginValue {
 			ranges.push({ from: pos.from, to: pos.to, keys: pos.keys, displayText });
 		}
 
+		// 异步解析未缓存 key
 		if (unresolvedKeys.size > 0) {
 			_engine.resolveCiteKeys([...unresolvedKeys]).then(() => {
 				this.decorations = this.compute();
@@ -347,7 +377,6 @@ class CitationPluginValue implements PluginValue {
 
 		return decos.length > 0 ? Decoration.set(decos, true) : Decoration.none;
 	}
-
 }
 
 // ── Factory ──
