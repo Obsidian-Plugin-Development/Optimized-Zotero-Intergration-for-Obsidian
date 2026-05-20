@@ -1,7 +1,7 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.5.3-alpha.1",
+	"version": "6.5.4",
 	"minAppVersion": "1.1.1",
 	"description": "v6.5.3-alpha.1: UI 视觉与交互逻辑完美收官 — 左侧图标互斥渲染 + 紫色跳转图标 + 数据错位修复 + 标题完整展开",
 	"author": "SuperLabKing",

@@ -41,7 +41,6 @@ async function loadGetCiteKeys() {
 
 const POLL_INTERVAL_MS = 200;
 const MAX_POLL_TIME_MS = 15000;
-const TITLE_MAX_LEN = 60;
 
 /**
  * 从 CSL-JSON 条目提取第一作者（纯文本，剥离标记字符）。
@@ -53,14 +52,14 @@ function extractFirstAuthor(item: any): string {
 }
 
 /**
- * 清洗标题：剥离 markdown 链接语法，截断过长文本。
+ * 清洗标题：剥离 markdown 链接语法。
+ * v6.5.3: 移除 JS 截断逻辑，完整标题交给 CSS line-clamp 处理。
  */
 function cleanTitle(item: any, key: string): string {
 	let title = item.title || '';
 	// 剥离 markdown 链接: [text](url)
 	title = title.replace(/^\[/, '').replace(/\]\(.*\)$/, '');
 	if (!title) return `@${key}`;
-	if (title.length > TITLE_MAX_LEN) title = title.slice(0, TITLE_MAX_LEN - 3) + '...';
 	return title;
 }
 

@@ -20,7 +20,7 @@ import { CitationEngine } from './citation/citationEngine';
 import { citationLivePreviewPlugin, getActiveEditorView } from './citation/cm6LivePreview';
 import { createCitationPostProcessor } from './citation/readingMode';
 import { CitationPopoverManager } from './citation/hoverPopover';
-import { initBibliographyWriter, setBibliographyHeading, hasBibHeading, updateBibliographyText, markBibClean } from './citation/bibliographyWriter';
+import { initBibliographyWriter, setBibliographyHeading, hasBibHeading, updateBibliographyText, markBibClean, initBibEmitter } from './citation/bibliographyWriter';
 
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
@@ -102,6 +102,7 @@ export default class ZoteroConnector extends Plugin {
   async onload() {
     try {
     this.emitter = new Events();
+    initBibEmitter(this.emitter); // v6.5.3: 初始化 bibliographyWriter 的 emitter 引用
     await this.loadSettings();
     setLocale(this.settings.locale || 'en');
 
@@ -229,15 +230,32 @@ export default class ZoteroConnector extends Plugin {
     this.addCommand({
       id: 'update-bibliography',
       name: t('command.updateReferences'),
-      editorCallback: async (_editor) => {
-        const view = getActiveEditorView();
+      callback: async () => {
+        // v6.5.3: 自动激活编辑器视图，无需用户手动点击正文
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new Notice(t('notice.noActiveFile'), 3000);
+          return;
+        }
+
+        // 尝试获取编辑器视图，如果不存在则强制在主编辑区打开
+        let view = getActiveEditorView();
+        if (!view || (view as any).isDestroyed) {
+          // 强制在主编辑区打开文件
+          const leaf = this.app.workspace.getLeaf('tab');
+          if (leaf) {
+            await leaf.openFile(file);
+            // 等待编辑器初始化
+            await new Promise(resolve => setTimeout(resolve, 150));
+            view = getActiveEditorView();
+          }
+        }
+
         if (!view || (view as any).isDestroyed) {
           new Notice(t('notice.noActiveEditorView'), 3000);
           return;
         }
-        // 立刻锁死目标文件，杜绝跨文件覆盖
-        const file = this.app.workspace.getActiveFile();
-        if (!file) return;
+
         const targetPath = file.path;
         const hud = SyncFloatingButton.instance;
         hud?.showProgress();
@@ -245,8 +263,7 @@ export default class ZoteroConnector extends Plugin {
         try {
           updateBibliographyText(view, targetPath);
 
-          // 刷新 HUD 引注缓存基线，终结文献更新后亮橙灯
-          await hud?.refreshCitationCachesAfterSync(file, view.state.doc.toString());
+          // v6.5.4: bibliographyWriter.ts 的 setBibDirty(false) 会自动触发 bibClean 事件并刷新缓存
 
           hud?.setProgress(100);
           // 补间引擎在 visual=100 时自动触发 triggerSuccess()

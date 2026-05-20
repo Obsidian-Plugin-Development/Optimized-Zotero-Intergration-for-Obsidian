@@ -65,6 +65,30 @@ export function setLastCitationSignature(filePath: string, sig: string) {
 	_signatureCache.set(filePath, sig);
 }
 
+/** 清除指定文件的引注签名缓存，用于文件切换时防止 cm6LivePreview 基于过期缓存误触发 markBibDirty */
+export function clearLastCitationSignature(filePath: string) {
+	_signatureCache.delete(filePath);
+}
+
+// ── v6.5.4: 参考文献区块哈希缓存（供 cm6LivePreview 实时检测手动删改）──
+
+const _refHashCache = new Map<string, string>();
+
+/** 获取上次同步后的参考文献区块哈希基线 */
+export function getLastRefHash(filePath: string): string | null {
+	return _refHashCache.has(filePath) ? _refHashCache.get(filePath)! : null;
+}
+
+/** 设置参考文献区块哈希基线（同步完成后调用） */
+export function setLastRefHash(filePath: string, hash: string) {
+	_refHashCache.set(filePath, hash);
+}
+
+/** 清除参考文献区块哈希基线 */
+export function clearLastRefHash(filePath: string) {
+	_refHashCache.delete(filePath);
+}
+
 // ── 模块级状态 ──
 let _bibEngine: CitationEngine;
 let _bibHeading = '参考文献';
@@ -72,6 +96,14 @@ export let isBibOutOfSync = false;
 
 /** dirty 状态变更回调列表 */
 const dirtyCallbacks: Array<(dirty: boolean) => void> = [];
+let pluginEmitter: any = null; // v6.5.3: 用于直接触发 plugin.emitter 事件
+let currentView: any = null; // v6.5.4: 存储当前 EditorView，用于读取最新文档内容
+
+/** v6.5.3: 初始化 plugin.emitter 引用，用于直接触发事件 */
+export function initBibEmitter(emitter: any) {
+	pluginEmitter = emitter;
+	console.log("[BibWriter Debug] pluginEmitter 已初始化");
+}
 
 /** 注册 dirty 状态变更回调（供 SyncFloatingButton 监听图标切换） */
 export function onBibDirtyChange(cb: (dirty: boolean) => void): () => void {
@@ -83,10 +115,30 @@ export function onBibDirtyChange(cb: (dirty: boolean) => void): () => void {
 }
 
 function setBibDirty(dirty: boolean) {
-	if (isBibOutOfSync === dirty) return;
+	console.log("[BibWriter Debug] setBibDirty 被调用, dirty =", dirty, "当前 isBibOutOfSync =", isBibOutOfSync, "dirtyCallbacks 数量 =", dirtyCallbacks.length);
+	if (isBibOutOfSync === dirty) {
+		console.log("[BibWriter Debug] 状态未变化，提前返回");
+		return;
+	}
 	isBibOutOfSync = dirty;
+	console.log("[BibWriter Debug] 开始调用", dirtyCallbacks.length, "个回调");
 	for (const cb of dirtyCallbacks) {
 		try { cb(dirty); } catch { /* 静默 */ }
+	}
+	console.log("[BibWriter Debug] 回调调用完成");
+
+	// v6.5.4: 直接触发 plugin.emitter 事件，传递最新文档内容避免从磁盘读取旧内容
+	if (pluginEmitter) {
+		console.log("[BibWriter Debug] 直接触发 plugin.emitter 事件:", dirty ? "bibDirty" : "bibClean");
+		try {
+			// 传递最新文档内容，避免 refreshCitationCachesAfterSync 从磁盘读取旧内容
+			const freshContent = currentView ? currentView.state.doc.toString() : undefined;
+			pluginEmitter.trigger(dirty ? 'bibDirty' : 'bibClean', freshContent);
+		} catch (e) {
+			console.error("[BibWriter Debug] 触发事件失败:", e);
+		}
+	} else {
+		console.warn("[BibWriter Debug] pluginEmitter 未初始化，无法触发事件");
 	}
 }
 
@@ -255,6 +307,7 @@ function assembleEntries(positionSorted: string[]): string[] | null {
  *   安全区覆盖标题行末尾 \n，插入 \n列表\n\n（标题与列表间永无空行）。
  */
 export function updateBibliographyText(view: EditorView, filePath?: string) {
+	currentView = view; // v6.5.4: 存储当前 view，用于读取最新文档内容
 	const docText = view.state.doc.toString();
 	const headingPattern = buildHeadingPattern();
 	const headingMatch = headingPattern.exec(docText);
@@ -300,6 +353,7 @@ export function updateBibliographyText(view: EditorView, filePath?: string) {
 	// 场景 B：有引注 + 无标题 → 在 EOF 自动创建
 	// ═══════════════════════════════════════════
 	if (!headingMatch) {
+		console.log('[BibWriter Debug] 进入 Scenario B 分支');
 		const headingText = _bibHeading;
 		// 标题下方紧跟列表，无空行
 		const insertText = '\n\n## ' + headingText + '\n' + markdownList + '\n';
@@ -310,9 +364,14 @@ export function updateBibliographyText(view: EditorView, filePath?: string) {
 		view.dispatch({
 			changes: { from: eof, to: eof, insert: insertText },
 		});
+		console.log('[BibWriter Debug] view.dispatch 执行完成，准备调用 setBibDirty(false)');
 
-		setBibDirty(false);
-		setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
+		// v6.5.4: 延迟触发 setBibDirty(false)，等待 CodeMirror 完成文档渲染
+		setTimeout(() => {
+			setBibDirty(false);
+			console.log('[BibWriter Debug] setBibDirty(false) 调用完成');
+			setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
+		}, 300);
 		return;
 	}
 
@@ -342,7 +401,9 @@ export function updateBibliographyText(view: EditorView, filePath?: string) {
 		changes: { from: zone.from, to: zone.to, insert: finalInsertText },
 	});
 
-	// 写入成功 → 标记为已同步
-	setBibDirty(false);
-	setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
+	// v6.5.4: 延迟触发 setBibDirty(false)，等待 CodeMirror 完成文档渲染
+	setTimeout(() => {
+		setBibDirty(false);
+		setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
+	}, 300);
 }

@@ -6,7 +6,7 @@ import process from 'process';
 const prod = process.argv[2] === 'production';
 
 const VAULT_PLUGIN_DIR =
-  'C:/Users/罗宇峰/Desktop/Obsidian Plugin Devlopment/.obsidian/plugins/optimized Zotero integration';
+  'C:/Users/罗宇峰/Desktop/Ob Test Vault/.obsidian/plugins/optimized-zotero-integration';
 
 const context = await esbuild.context({
   entryPoints: ['./src/main.ts'],
