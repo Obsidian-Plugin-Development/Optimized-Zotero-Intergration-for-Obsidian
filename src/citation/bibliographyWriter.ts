@@ -114,7 +114,7 @@ export function onBibDirtyChange(cb: (dirty: boolean) => void): () => void {
 	};
 }
 
-function setBibDirty(dirty: boolean) {
+function setBibDirty(dirty: boolean, silent = false) {
 	console.log("[BibWriter Debug] setBibDirty 被调用, dirty =", dirty, "当前 isBibOutOfSync =", isBibOutOfSync, "dirtyCallbacks 数量 =", dirtyCallbacks.length);
 	if (isBibOutOfSync === dirty) {
 		console.log("[BibWriter Debug] 状态未变化，提前返回");
@@ -128,7 +128,7 @@ function setBibDirty(dirty: boolean) {
 	console.log("[BibWriter Debug] 回调调用完成");
 
 	// v6.5.4: 直接触发 plugin.emitter 事件，传递最新文档内容避免从磁盘读取旧内容
-	if (pluginEmitter) {
+	if (!silent && pluginEmitter) {
 		console.log("[BibWriter Debug] 直接触发 plugin.emitter 事件:", dirty ? "bibDirty" : "bibClean");
 		try {
 			// 传递最新文档内容，避免 refreshCitationCachesAfterSync 从磁盘读取旧内容
@@ -148,8 +148,8 @@ export function markBibDirty() {
 }
 
 /** 参考文献写入完成后调用（sync-bibliography 命令触发） */
-export function markBibClean() {
-	setBibDirty(false);
+export function markBibClean(silent = false) {
+	setBibDirty(false, silent);
 }
 
 export function initBibliographyWriter(engine: CitationEngine, heading: string) {

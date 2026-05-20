@@ -3,7 +3,7 @@ import { getItemJSONFromCiteKeys } from './jsonRPC';
 import type ZoteroConnector from '../main';
 import { t } from '../locale/i18n';
 import type { TriggerCondition } from '../types';
-import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, clearLastCitationSignature, setLastRefHash, clearLastRefHash } from '../citation/bibliographyWriter';
+import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, clearLastCitationSignature, setLastRefHash } from '../citation/bibliographyWriter';
 import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetadataState, metadataSyncHashCache } from '../citation/metadataSyncDetector';
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
@@ -304,13 +304,12 @@ export class SyncFloatingButton {
     // cm6LivePreview 会对比出 "" !== "key1,key2" 从而错误标记 dirty
     if (filePath) {
       clearLastCitationSignature(filePath);
-      clearLastRefHash(filePath);
-      console.log("[HUD State Debug] 已清除文件签名缓存+refHash缓存:", filePath);
+            console.log("[HUD State Debug] 已清除文件签名缓存:", filePath);
     }
 
     // 1. 模块级脏标志归零
     resetMetadataState(this.plugin.emitter);
-    markBibClean();
+    markBibClean(true);
 
     // 2. 停止所有进行中计时器
     if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
