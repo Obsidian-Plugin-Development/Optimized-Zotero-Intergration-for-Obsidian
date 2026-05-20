@@ -3,7 +3,7 @@ import { EditableFileView, Editor, Events, Notice, Plugin, TFile, htmlToMarkdown
 import { shellPath } from 'shell-path';
 
 import { DataExplorerView, viewType } from './DataExplorerView';
-import { getCiteKeys } from './bbt/cayw';
+import { getCiteKeys, startZoteroHeartbeat, stopZoteroHeartbeat } from './bbt/cayw';
 import {
   injectBeautifyStyles,
   removeBeautifyStyles,
@@ -21,6 +21,7 @@ import { citationLivePreviewPlugin, getActiveEditorView } from './citation/cm6Li
 import { createCitationPostProcessor } from './citation/readingMode';
 import { CitationPopoverManager } from './citation/hoverPopover';
 import { initBibliographyWriter, setBibliographyHeading, hasBibHeading, updateBibliographyText, markBibClean, initBibEmitter } from './citation/bibliographyWriter';
+import { initPowerShellBridge, disposePowerShellBridge } from './helpers';
 
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
@@ -127,6 +128,14 @@ export default class ZoteroConnector extends Plugin {
     this.updatePDFUtility();
     this.addSettingTab(new ZoteroConnectorSettingsTab(this.app, this));
     this.registerView(viewType, (leaf) => new DataExplorerView(this, leaf));
+
+    // ★ v7.4: 预保温 PowerShell 桥接 + 启动 Zotero 心跳探针
+    initPowerShellBridge();
+    startZoteroHeartbeat({
+      database: this.settings.database,
+      port: this.settings.port,
+    });
+
 
     // ── v6.0：引注渲染引擎初始化 ──
     this.citationEngine = new CitationEngine(this);
@@ -426,6 +435,8 @@ export default class ZoteroConnector extends Plugin {
     });
 
     this.citationPopover?.unregister();
+    stopZoteroHeartbeat();
+    disposePowerShellBridge();
     removeBeautifyStyles();
     this.app.workspace.detachLeavesOfType(viewType);
   }

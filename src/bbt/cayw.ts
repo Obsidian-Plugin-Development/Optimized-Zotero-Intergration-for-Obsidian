@@ -141,6 +141,26 @@ export async function getCiteKeys(
   }
 }
 
+// ── v7.4 Zotero 幽灵心跳：25s 间隔保活探针，确保 isZoteroRunning 永远热路径 ──
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startZoteroHeartbeat(database: DatabaseWithPort): void {
+  if (heartbeatTimer) return;
+  // 立即发送首次探针
+  isZoteroRunning(database, true);
+  // 每 25s 保活（< 30s TTL，确保缓存永不过期）
+  heartbeatTimer = setInterval(() => {
+    isZoteroRunning(database, true);
+  }, 25_000);
+}
+
+export function stopZoteroHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
 export async function getCAYWJSON(database: DatabaseWithPort) {
   const win = getCurrentWindow();
   if (!(await isZoteroRunning(database))) {

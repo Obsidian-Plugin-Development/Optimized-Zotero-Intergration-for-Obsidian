@@ -3,9 +3,79 @@ import fs from 'fs';
 import { FileSystemAdapter, Notice } from 'obsidian';
 import os from 'os';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, spawn, type ChildProcess } from 'child_process';
 
 import { t } from './locale/i18n';
+
+
+// ── v7.4 常驻 PowerShell IPC 桥接 — 消除每次 CAYW 的 exec() 进程创建开销 ──
+let psProcess: ChildProcess | null = null;
+let psRequestId = 0;
+const psPending = new Map<number, { resolve: () => void; reject: (err: Error) => void }>();
+let psStdoutBuf = '';
+const PS_MARKER_PREFIX = 'PS_DONE_';
+
+/** 插件初始化时调用：启动常驻 PowerShell 后台进程 */
+export function initPowerShellBridge(): void {
+  if (psProcess && !psProcess.killed) return;
+  try {
+    psProcess = spawn('powershell', ['-NoProfile', '-NoLogo', '-NoExit'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    psProcess.stdout?.on('data', (data: Buffer) => {
+      psStdoutBuf += data.toString('utf-8');
+      const lines = psStdoutBuf.split('\n');
+      psStdoutBuf = lines.pop() || '';
+      for (const line of lines) {
+        const match = line.match(/PS_DONE_(\d+)/);
+        if (match) {
+          const id = parseInt(match[1], 10);
+          const pending = psPending.get(id);
+          if (pending) {
+            pending.resolve();
+            psPending.delete(id);
+          }
+        }
+      }
+    });
+    psProcess.stderr?.on('data', (data: Buffer) => {
+      console.debug('[PS Bridge]', data.toString('utf-8'));
+    });
+    psProcess.on('exit', (code) => {
+      console.warn('[PS Bridge] Process exited with code', code);
+      for (const [, req] of psPending) {
+        req.reject(new Error('PowerShell process exited unexpectedly'));
+      }
+      psPending.clear();
+      psProcess = null;
+    });
+  } catch (e) {
+    console.error('[PS Bridge] Failed to spawn PowerShell:', e);
+    psProcess = null;
+  }
+}
+
+/** 插件卸载时调用：可靠杀死常驻 PowerShell 进程，不留僵尸 */
+export function disposePowerShellBridge(): void {
+  if (!psProcess || psProcess.killed) { psProcess = null; return; }
+  const p = psProcess;
+  psProcess = null;
+  // 先优雅退出
+  try { p.stdin?.write('exit\n'); } catch {}
+  // 500ms 后强制 kill
+  setTimeout(() => {
+    try { p.kill('SIGTERM'); } catch {}
+    // 再等 200ms，若仍存活则 SIGKILL
+    setTimeout(() => {
+      try { if (!p.killed) p.kill('SIGKILL'); } catch {}
+    }, 200);
+  }, 500);
+  // 拒绝所有等待中的请求
+  for (const [, req] of psPending) {
+    req.reject(new Error('PowerShell bridge disposed'));
+  }
+  psPending.clear();
+}
 
 export function getCurrentWindow() {
   try {
@@ -53,33 +123,65 @@ export function focusZotero(database: string = 'Zotero'): Promise<void> {
   const appName = database === 'Juris-M' ? 'Juris-M' : 'Zotero';
   const TIMEOUT_MS = 2000;
 
-  const doFocus = new Promise<void>((resolve) => {
+  return new Promise<void>((resolve) => {
+    // macOS: 仍使用 exec 调用 osascript（macOS 无进程创建瓶颈）
+    if (process.platform === 'darwin') {
+      exec(
+        `osascript -e 'tell application "${appName}" to activate'`,
+        (err) => {
+          if (err) console.debug('focusZotero macOS:', err.message);
+          resolve();
+        }
+      );
+      return;
+    }
+
+    // 非 Windows: 直接 resolve
+    if (process.platform !== 'win32') {
+      resolve();
+      return;
+    }
+
+    // ★ v7.4 Windows: 通过常驻 PowerShell 桥接发送命令，消除 exec() 进程创建开销
+    if (!psProcess || psProcess.killed) {
+      initPowerShellBridge();
+    }
+
+    if (!psProcess || psProcess.killed) {
+      // 桥接不可用时回退到 exec（静默降级）
+      exec(
+        `powershell -NoProfile -Command "$c=Add-Type -MemberDefinition '[DllImport(\\"user32.dll\\")]public static extern bool AllowSetForegroundWindow(uint pid);' -Name 'W' -Namespace 'N' -PassThru;$p=Get-Process -Name '${appName}' -ErrorAction SilentlyContinue|Where-Object{$_.Id}|Select-Object -First 1;if($p){$c::AllowSetForegroundWindow($p.Id)}"`,
+        (err) => {
+          if (err) console.debug('focusZotero Windows (fallback):', err.message);
+          resolve();
+        }
+      );
+      return;
+    }
+
+    const id = ++psRequestId;
+
+    // 2 秒安全超时：不阻塞 CAYW 主流程
+    const timer = setTimeout(() => {
+      psPending.delete(id);
+      resolve();
+    }, TIMEOUT_MS);
+
+    psPending.set(id, {
+      resolve: () => { clearTimeout(timer); resolve(); },
+      reject: (_err: Error) => { clearTimeout(timer); resolve(); },
+    });
+
     try {
-      if (process.platform === 'darwin') {
-        exec(
-          `osascript -e 'tell application "${appName}" to activate'`,
-          (err) => {
-            if (err) console.debug('focusZotero macOS:', err.message);
-            resolve();
-          }
-        );
-      } else if (process.platform === 'win32') {
-        exec(
-          `powershell -NoProfile -Command "$c=Add-Type -MemberDefinition '[DllImport(\\\"user32.dll\\\")]public static extern bool AllowSetForegroundWindow(uint pid);' -Name 'W' -Namespace 'N' -PassThru;$p=Get-Process -Name '${appName}' -ErrorAction SilentlyContinue|Where-Object{$_.Id}|Select-Object -First 1;if($p){$c::AllowSetForegroundWindow($p.Id)}"`,
-          (err) => {
-            if (err) console.debug('focusZotero Windows:', err.message);
-            resolve();
-          }
-        );
-      } else {
-        resolve();
-      }
+      psProcess.stdin!.write(
+        `$c=Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool AllowSetForegroundWindow(uint pid);' -Name 'W' -Namespace 'N' -PassThru;$p=Get-Process -Name '${appName}' -ErrorAction SilentlyContinue|Where-Object{$_.Id}|Select-Object -First 1;if($p){$c::AllowSetForegroundWindow($p.Id)};Write-Host '${PS_MARKER_PREFIX}${id}'\n`
+      );
     } catch {
+      psPending.delete(id);
+      clearTimeout(timer);
       resolve();
     }
   });
-
-  return Promise.race([doFocus, new Promise<void>((r) => setTimeout(r, TIMEOUT_MS))]);
 }
 
 export function padNumber(n: number): string {
