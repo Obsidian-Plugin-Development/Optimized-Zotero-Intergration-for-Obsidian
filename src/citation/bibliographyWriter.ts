@@ -89,6 +89,34 @@ export function clearLastRefHash(filePath: string) {
 	_refHashCache.delete(filePath);
 }
 
+// ── v6.5.4-alpha.3: 共享参考文献区块哈希计算 ──
+
+/**
+ * 计算文档中参考文献安全区的纯文本哈希（剔除空白）。
+ * 与 SyncFloatingButton.findReferencesZone 逻辑一致，但使用动态 _bibHeading。
+ * 返回 null 表示文档中不存在参考文献区块。
+ */
+export function computeRefSectionHash(docText: string): string | null {
+	const escaped = escapeRegex(_bibHeading);
+	const headingRe = new RegExp(`^(#{1,3})\\s+(${escaped})\\s*$`, 'm');
+	const m = headingRe.exec(docText);
+	if (!m) return null;
+	const headingLevel = m[1].length;
+	const zoneStart = m.index + m[0].length;
+	const rest = docText.slice(zoneStart);
+	const nextRe = new RegExp(`^#{1,${headingLevel}}\\s`, 'm');
+	const nextM = nextRe.exec(rest);
+	const zoneEnd = nextM ? zoneStart + nextM.index : docText.length;
+	const section = docText.slice(zoneStart, zoneEnd).replace(/\s+/g, '');
+	if (!section) return null;
+	let hash = 0;
+	for (let i = 0; i < section.length; i++) {
+		hash = ((hash << 5) - hash) + section.charCodeAt(i);
+		hash |= 0;
+	}
+	return String(hash);
+}
+
 // ── 模块级状态 ──
 let _bibEngine: CitationEngine;
 let _bibHeading = '参考文献';
@@ -370,7 +398,11 @@ export function updateBibliographyText(view: EditorView, filePath?: string) {
 		setTimeout(() => {
 			setBibDirty(false);
 			console.log('[BibWriter Debug] setBibDirty(false) 调用完成');
-			setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
+			const fp = filePath || '';
+			const newDocText = view.state.doc.toString();
+			setLastCitationSignature(fp, extractCitationSignature(newDocText));
+			const newRefHash = computeRefSectionHash(newDocText);
+			if (newRefHash) setLastRefHash(fp, newRefHash);
 		}, 300);
 		return;
 	}
@@ -404,6 +436,10 @@ export function updateBibliographyText(view: EditorView, filePath?: string) {
 	// v6.5.4: 延迟触发 setBibDirty(false)，等待 CodeMirror 完成文档渲染
 	setTimeout(() => {
 		setBibDirty(false);
-		setLastCitationSignature(filePath || '', extractCitationSignature(view.state.doc.toString()));
+		const fp = filePath || '';
+		const newDocText = view.state.doc.toString();
+		setLastCitationSignature(fp, extractCitationSignature(newDocText));
+		const newRefHash = computeRefSectionHash(newDocText);
+		if (newRefHash) setLastRefHash(fp, newRefHash);
 	}, 300);
 }

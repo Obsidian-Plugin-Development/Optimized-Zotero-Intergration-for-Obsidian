@@ -26,7 +26,7 @@ import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
 import { updateCitationStore } from './citationStore';
 import type { CitationStore, CitePos } from './citationStore';
-import { markBibDirty, markBibClean, extractCitationSignature, getLastCitationSignature, setLastCitationSignature, getLastRefHash, setLastRefHash, clearLastRefHash } from './bibliographyWriter';
+import { isBibOutOfSync, markBibDirty, markBibClean, extractCitationSignature, getLastCitationSignature, setLastCitationSignature, getLastRefHash, setLastRefHash, clearLastRefHash, computeRefSectionHash } from './bibliographyWriter';
 
 // ── 模块级闭包引用 ──
 let _engine: CitationEngine;
@@ -183,33 +183,6 @@ function scanDocumentForCitations(docText: string): CitePos[] {
 	return positions;
 }
 
-// ── v6.5.4: 参考文献区块哈希（供实时完整性检测）──
-
-/**
- * 定位文档中参考文献标题下方的安全区并计算内容哈希（剔除空白）。
- * 与 SyncFloatingButton.findReferencesZone / computeReferencesHash 逻辑一致。
- * 返回 null 表示文档中不存在参考文献区块。
- */
-function computeReferencesZoneHash(docText: string): string | null {
-	const headingRe = /^#{1,3}\s+参考文献\s*$/m;
-	const m = headingRe.exec(docText);
-	if (!m) return null;
-	const headingLevel = (m[0].match(/^#+/)!)[0].length;
-	const zoneStart = m.index + m[0].length;
-	const rest = docText.slice(zoneStart);
-	const nextRe = new RegExp(`^#{1,${headingLevel}}\\s`, 'm');
-	const nextM = nextRe.exec(rest);
-	const zoneEnd = nextM ? zoneStart + nextM.index : docText.length;
-	const section = docText.slice(zoneStart, zoneEnd).replace(/\s+/g, '');
-	if (!section) return null;
-	let hash = 0;
-	for (let i = 0; i < section.length; i++) {
-		hash = ((hash << 5) - hash) + section.charCodeAt(i);
-		hash |= 0;
-	}
-	return String(hash);
-}
-
 // ── ViewPlugin ──
 
 class CitationPluginValue implements PluginValue {
@@ -282,22 +255,23 @@ class CitationPluginValue implements PluginValue {
 			//   - 签名变为空 → 用户删除了所有引注 → 标记 clean + 更新基线
 			//     （若参考文献区块仍存在，silentDiffCheck 下次 focus 时会检测到数量不对等并纠正）
 			//   - 签名变为非空 → 正常标记 dirty
-			if (currentSignature === '') {
-				console.log('[cm6LivePreview] 检测到所有引注已删除，标记 clean');
-				setLastCitationSignature(filePath, '');
-				markBibClean();
-				try { _plugin.emitter.trigger('bibClean'); } catch { /* 静默 */ }
-			} else {
-				markBibDirty();
-				try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
-			}
+				if (currentSignature === "") {
+					// v6.5.4-alpha.3: 静默模式 — 不触发 bibClean 事件，
+					// 避免 refreshCitationCachesAfterSync 清空 _refHashCache，
+					// 从而保留基线供 Ctrl+Z 撤销检测。
+					console.log("[cm6LivePreview] 检测到所有引注已删除，标记 clean（静默，保留基线）");
+					markBibClean(true);
+				} else {
+					markBibDirty();
+					try { _plugin.emitter.trigger("bibDirty"); } catch { /* 静默 */ }
+				}
 		}
 
 		// v6.5.4: 参考文献区块实时完整性检测
 		// 每次 compute 时计算当前参考文献哈希，与同步后基线比对
 		//   用户手动删改参考文献条目 → refHash 变更 → 实时标记 dirty
 		//   基线由 refreshCitationCachesAfterSync / silentDiffCheck 在同步后写入
-		const currentRefHash = computeReferencesZoneHash(docText);
+		const currentRefHash = computeRefSectionHash(docText);
 		const cachedRefHash = getLastRefHash(filePath);
 		if (cachedRefHash !== null && currentRefHash !== null && currentRefHash !== cachedRefHash) {
 			console.log('[cm6LivePreview] 检测到参考文献区块被手动修改');
@@ -307,8 +281,24 @@ class CitationPluginValue implements PluginValue {
 			// 首次遇到参考文献区块 → 建立基线（后续修改将被检测）
 			setLastRefHash(filePath, currentRefHash);
 		} else if (currentRefHash === null && cachedRefHash !== null) {
-			// 参考文献区块被完全删除 → 清除基线
-			clearLastRefHash(filePath);
+			// v6.5.4-alpha.3: 不删除基线，保留旧值供 Ctrl+Z 撤销检测
+			// refBlock 被删除但缓存保留，若恢复则哈希自动匹配
+			
+		}
+
+		// v6.5.4-alpha.3: 撤销/重做恢复检测
+		// 当引注签名和参考文献哈希同时匹配基线，但 isBibOutOfSync 仍为 true 时，
+		// 说明用户通过 Ctrl+Z 撤销了之前的破坏性编辑，文档已恢复至同步后基线状态。
+		if (
+			isBibOutOfSync &&
+			cachedSignature !== null &&
+			currentSignature === cachedSignature &&
+			cachedRefHash !== null &&
+			currentRefHash === cachedRefHash
+		) {
+			console.log("[cm6LivePreview] 检测到文档恢复至基线状态（撤销/重做），标记 clean");
+			markBibClean();
+			try { _plugin.emitter.trigger("bibClean"); } catch { /* 静默 */ }
 		}
 
 		const positions = scanDocumentForCitations(docText);
