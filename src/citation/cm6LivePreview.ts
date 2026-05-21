@@ -104,6 +104,26 @@ function foldNumbers(sortedUnique: number[]): string {
 }
 
 /**
+ * v7.3.1 轻量级引注签名计算 — 单次正则扫描 [@citekey]。
+ *
+ * 与 unifiedScanDocument().signature 语义一致（排序去重 citekey，逗号拼接），
+ * 供 checkRefSectionIntegrity 恢复检测使用，不依赖可能过时的 this.cachedScan。
+ */
+function computeQuickCitationSignature(docText: string): string {
+	const pattern = /\[@([^\]]+)\]/g;
+	const keys: string[] = [];
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(docText)) !== null) {
+		const rawKeys = match[1]
+			.split(';')
+			.map((s) => s.trim().replace(/^@/, ''))
+			.filter(Boolean);
+		keys.push(...rawKeys);
+	}
+	return [...new Set(keys)].sort().join(',');
+}
+
+/**
  * v7.0 硬编码上标数字渲染（无 CSL 依赖）。
  * 返回纯文本数字（如 "1" 或 "1-3"），
  * Widget 通过 CSS 类 .custom-citation-inline 实现上标效果。
@@ -180,8 +200,10 @@ class CitationPluginValue implements PluginValue {
 			// ★ v7.3 门控：仅当变更涉及 [、]、@ 字符才触发全量重扫
 			if (this.changeAffectsCitations(update)) {
 				this.decorations = this.compute();
+			} else {
+				// ★ v7.3 修复：参考文献区块编辑检测（轻量，仅 refHash 比对，不重扫全文）
+				this.checkRefSectionIntegrity(update);
 			}
-			// 否则：变更不涉及引注字符，跳过重扫，保持现有装饰
 			return;
 		}
 		if (update.viewportChanged || update.selectionSet) {
@@ -233,6 +255,62 @@ class CitationPluginValue implements PluginValue {
 		}
 
 		return affects;
+	}
+
+	/**
+	 * v7.3 修复：轻量级参考文献区块完整性检测。
+	 *
+	 * 背景：changeAffectsCitations() 门控仅检查 [、]、@ 字符，
+	 * 参考文献条目文字不含这些字符，导致用户手动删改参考文献时
+	 * compute() 被跳过，refHash 比对不执行，悬浮球无脏提示。
+	 *
+	 * 本函数仅做 refHash 比对（O(参考文献区块大小)），不触发全文档重扫。
+	 */
+	private checkRefSectionIntegrity(update: ViewUpdate) {
+		const filePath = _plugin?.app?.workspace?.getActiveFile()?.path || '';
+		const cachedRefHash = getLastRefHash(filePath);
+
+		// 当前（编辑后）文档的参考文献哈希
+		const docText = this.view.state.doc.toString();
+		const currentRefHash = computeRefSectionHash(docText);
+
+		// ★ 无基线 → 从编辑前文档状态建立基线（自给自足，不依赖 silentDiffCheck）
+		if (cachedRefHash === null) {
+			const preDocText = update.startState.doc.toString();
+			const preRefHash = computeRefSectionHash(preDocText);
+			if (preRefHash !== null) {
+				setLastRefHash(filePath, preRefHash);
+				// 若编辑前后哈希已不同，立即标记脏
+				if (currentRefHash !== preRefHash) {
+					console.log('[cm6LivePreview] 检测到参考文献区块被手动修改（自建基线路径）');
+					markBibDirty();
+					try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
+				}
+			} else if (currentRefHash !== null) {
+				setLastRefHash(filePath, currentRefHash);
+			}
+			return;
+		}
+
+		// 哈希不匹配 → 参考文献被手动修改或删除
+		if (currentRefHash !== cachedRefHash) {
+			console.log('[cm6LivePreview] 检测到参考文献区块被手动修改（轻量门控路径）');
+			markBibDirty();
+			try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
+			return;
+		}
+
+		// ★ 恢复检测：脏状态 + 哈希已恢复 → 撤销/重做恢复
+		// v7.3.1: 直接对当前文档计算引注签名，不依赖 this.cachedScan（可能过时）
+		if (isBibOutOfSync && currentRefHash === cachedRefHash) {
+			const cachedSignature = getLastCitationSignature(filePath);
+			const currentSignature = computeQuickCitationSignature(docText);
+			if (cachedSignature === null || currentSignature === cachedSignature) {
+				console.log('[cm6LivePreview] 检测到参考文献区块恢复至基线（轻量门控路径），标记 clean');
+				markBibClean();
+				try { _plugin.emitter.trigger('bibClean'); } catch { /* 静默 */ }
+			}
+		}
 	}
 
 	destroy() {}

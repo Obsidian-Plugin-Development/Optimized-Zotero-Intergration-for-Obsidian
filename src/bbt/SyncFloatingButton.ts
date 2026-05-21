@@ -3,7 +3,7 @@ import { getItemJSONFromCiteKeys } from './jsonRPC';
 import type ZoteroConnector from '../main';
 import { t } from '../locale/i18n';
 import type { TriggerCondition } from '../types';
-import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, clearLastCitationSignature, setLastRefHash } from '../citation/bibliographyWriter';
+import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, clearLastCitationSignature, setLastRefHash, clearLastRefHash } from '../citation/bibliographyWriter';
 import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetadataState, metadataSyncHashCache } from '../citation/metadataSyncDetector';
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
@@ -487,25 +487,6 @@ export class SyncFloatingButton {
         return;
       }
 
-      // ── 元数据检测：Zotero-now vs Zotero-then（同源比对，杜绝假阳性）──
-      let metadataDirty = false;
-      const currentHash = await this.computeMetadataHash(citeKey, file);
-      if (currentHash) {
-        const storedHash = metadataSyncHashCache.get(file.path);
-        console.log("[HUD State Debug] 元数据检测 - storedHash:", storedHash, "currentHash:", currentHash);
-        if (storedHash === undefined) {
-          console.log("[HUD State Debug] 元数据缓存未命中，标记为已同步");
-          markMetadataSynced(file.path, currentHash, this.plugin.emitter);
-        } else if (storedHash !== currentHash) {
-          console.log("[HUD State Debug] 元数据哈希不匹配，标记为脏");
-          checkMetadataDirty(file.path, currentHash, this.plugin.emitter, true);
-          metadataDirty = true;
-        } else {
-          console.log("[HUD State Debug] 元数据哈希匹配，标记为已同步");
-          markMetadataSynced(file.path, currentHash, this.plugin.emitter);
-        }
-      }
-
       // ── 引注检测：正文citekey vs 参考文献区块三层严格对账 ──
 	      let citationDirty = false;
 	      console.log("[HUD State Debug] ========== 开始引注检测 ==========");
@@ -588,7 +569,11 @@ export class SyncFloatingButton {
         } else if (storedRefHash === undefined && (bodyKeys.length > 0 || refCount > 0)) {
           // 首次：存储基线（排除无引注无参考文献的情况，避免与 561 行分支冲突）
           console.log("[HUD State Debug] 引注检测结果：首次访问，存储基线 → markBibClean()");
-          if (refHash) SyncFloatingButton.referencesHashCache.set(file.path, refHash);
+          if (refHash) {
+            SyncFloatingButton.referencesHashCache.set(file.path, refHash);
+            // ★ 同步 _refHashCache，确保 cm6LivePreview light gate 能读到基线
+            setLastRefHash(file.path, refHash);
+          }
           SyncFloatingButton.citekeySignatureCache.set(file.path, bodySig);
           markBibClean();
         } else if (storedRefHash !== refHash) {
@@ -601,6 +586,28 @@ export class SyncFloatingButton {
           markBibClean();
         }
       } catch { /* 引注解析失败，跳过 */ }
+
+      // ★ 引注检测完成 → 立即更新图标（不等网络元数据检测）
+      if (citationDirty) this.updateBibStatusIcon();
+
+      // ── 元数据检测：Zotero-now vs Zotero-then（同源比对，杜绝假阳性）──
+      let metadataDirty = false;
+      const currentHash = await this.computeMetadataHash(citeKey, file);
+      if (currentHash) {
+        const storedHash = metadataSyncHashCache.get(file.path);
+        console.log("[HUD State Debug] 元数据检测 - storedHash:", storedHash, "currentHash:", currentHash);
+        if (storedHash === undefined) {
+          console.log("[HUD State Debug] 元数据缓存未命中，标记为已同步");
+          markMetadataSynced(file.path, currentHash, this.plugin.emitter);
+        } else if (storedHash !== currentHash) {
+          console.log("[HUD State Debug] 元数据哈希不匹配，标记为脏");
+          checkMetadataDirty(file.path, currentHash, this.plugin.emitter, true);
+          metadataDirty = true;
+        } else {
+          console.log("[HUD State Debug] 元数据哈希匹配，标记为已同步");
+          markMetadataSynced(file.path, currentHash, this.plugin.emitter);
+        }
+      }
 
       // ── 时机路由 ──
       if (trigger === 'file-open' && metadataDirty && !citationDirty) {
