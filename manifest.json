@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.6.0-alpha.2",
+	"version": "6.6.1",
 	"minAppVersion": "1.1.1",
-	"description": "v6.6.0-alpha.2: BBT CAYW 唤醒链路极限压榨 — 常驻PowerShell桥接 + Zotero幽灵心跳，热路径Obsidian侧耗时 300ms→20ms 视觉与交互逻辑完美收官 — 左侧图标互斥渲染 + 紫色跳转图标 + 数据错位修复 + 标题完整展开",
+	"description": "v6.6.1: Zotero窗口智能管理 + 参考文献删除实时检测 + 调试日志收口 — IsIconic 最小化前检查 + compute() 区块删除漏检修复 + 双签名来源统一",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

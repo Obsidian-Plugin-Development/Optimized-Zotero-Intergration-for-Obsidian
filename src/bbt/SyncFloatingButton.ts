@@ -3,7 +3,7 @@ import { getItemJSONFromCiteKeys } from './jsonRPC';
 import type ZoteroConnector from '../main';
 import { t } from '../locale/i18n';
 import type { TriggerCondition } from '../types';
-import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, clearLastCitationSignature, setLastRefHash, clearLastRefHash } from '../citation/bibliographyWriter';
+import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, setLastRefHash, clearLastRefHash, getLastRefHash, computeRefSectionHash, getBibliographyHeading } from '../citation/bibliographyWriter';
 import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetadataState, metadataSyncHashCache } from '../citation/metadataSyncDetector';
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
@@ -28,6 +28,9 @@ const POS_STORAGE_KEY = 'sync-floating-button-pos';
 
 /** v6.5.0: 预编译引注签名正则 — 严格匹配 [@key] 或 [@key1; @key2] */
 const CITEKEY_SIG_RE = /\[@([^\]]+)\]/g;
+
+/** v6.6.1: HUD 调试日志开关 — 生产环境保持 false */
+const DEBUG_HUD = false;
 
 interface SavedPosition {
   left: string;   // 'auto' | 'Npx'
@@ -296,20 +299,18 @@ export class SyncFloatingButton {
     if (this.focusDebounceTimer) {
       clearTimeout(this.focusDebounceTimer);
       this.focusDebounceTimer = null;
-      console.log("[HUD State Debug] 已清除 focus 防抖定时器");
+      DEBUG_HUD && console.log("[HUD State Debug] 已清除 focus 防抖定时器");
     }
 
-    // v6.5.4: 清除 _signatureCache 过期缓存，防止 cm6LivePreview 基于旧签名误触发 markBibDirty
-    // 当用户删除了所有引注后切回文件，旧签名（如 "key1,key2"）仍在缓存中，
-    // cm6LivePreview 会对比出 "" !== "key1,key2" 从而错误标记 dirty
-    if (filePath) {
-      clearLastCitationSignature(filePath);
-            console.log("[HUD State Debug] 已清除文件签名缓存:", filePath);
-    }
+    // v6.6.1: 不再清除 _signatureCache — 保留基线让 cm6LivePreview 在 EditorView 重建后
+    // 能立即通过签名 diff 恢复正确的脏状态。旧签名导致的所有引注删除误报已有
+    // cm6LivePreview.compute() 中的 currentSignature === "" → markBibClean(true) 兜底。
 
-    // 1. 模块级脏标志归零
+    // 1. 元数据脏标志归零（bib 脏标志保留，由 cm6LivePreview / silentDiffCheck 根据实际文件内容重新判定）
     resetMetadataState(this.plugin.emitter);
-    markBibClean(true);
+    // v6.6.1: 不再无条件 markBibClean(true)，避免标签页切换时丢失参考文献脏状态。
+    // 正确状态由后续 cm6LivePreview.compute() / checkRefSectionIntegrity() 和
+    // silentDiffCheck() 根据 _refHashCache 基线比对确定。
 
     // 2. 停止所有进行中计时器
     if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
@@ -343,13 +344,41 @@ export class SyncFloatingButton {
     // 文件切换 — 开卷时机：metadata脏→自动同步, 引注脏→仅视觉
     this.plugin.registerEvent(
       this.plugin.app.workspace.on('file-open', (file) => {
-        console.log("[HUD State Debug] ========== file-open 事件触发 ==========");
-        console.log("[HUD State Debug] 目标文件路径:", file?.path || "null");
-        console.log("[HUD State Debug] 是否为文献笔记:", file ? this.isLiteratureNote(file) : false);
+        DEBUG_HUD && console.log("[HUD State Debug] ========== file-open 事件触发 ==========");
+        DEBUG_HUD && console.log("[HUD State Debug] 目标文件路径:", file?.path || "null");
+        DEBUG_HUD && console.log("[HUD State Debug] 是否为文献笔记:", file ? this.isLiteratureNote(file) : false);
 
         if (file && this.isLiteratureNote(file)) {
           this.forceResetState(file.path); // 先物理清零 + 清除签名缓存，杜绝跨文件状态污染
           this.mount();
+          // v6.6.1: 同步 refHash 检查 — mount() 后立刻根据 _refHashCache 基线比对，
+          // 在 silentDiffCheck 异步完成前就设置正确的 bib 脏/净状态，消除标签页切换时的闪烁。
+          // 与 silentDiffCheck 不同的是，这里使用 _refHashCache（来自 bibliographyWriter）
+          // 而非 referencesHashCache（来自 SyncFloatingButton），两条基线互补保证不遗漏。
+          // ★ 从 MarkdownView 获取 EditorView，避免 getActiveEditorView() 返回旧文件的编辑器
+          try {
+            const mdView = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+            const editorView = (mdView as any)?.editor?.cm?.cm;
+            if (editorView) {
+              const docText = editorView.state.doc.toString();
+              const currentRefHash = computeRefSectionHash(docText);
+              const cachedRefHash = getLastRefHash(file.path);
+              console.log("[HUD SyncCheck] 同步 refHash 检查: cachedRefHash =", cachedRefHash, "currentRefHash =", currentRefHash);
+              if (cachedRefHash !== null && currentRefHash !== cachedRefHash) {
+                console.log("[HUD SyncCheck] 不匹配 → markBibDirty()");
+                markBibDirty();
+              } else if (cachedRefHash === null && currentRefHash !== null) {
+                console.log("[HUD SyncCheck] 无基线，建立新基线");
+                setLastRefHash(file.path, currentRefHash);
+              } else {
+                console.log("[HUD SyncCheck] 匹配，无需操作");
+              }
+            } else {
+              console.log("[HUD SyncCheck] 无法获取 EditorView，跳过同步检查");
+            }
+          } catch (e) {
+            console.log("[HUD SyncCheck] 异常:", e);
+          }
           this.silentDiffCheck(file, 'file-open');
         } else {
           this.destroy();
@@ -382,18 +411,20 @@ export class SyncFloatingButton {
     this.plugin.registerEvent(
       this.plugin.emitter.on('bibDirty', () => this.updateBibStatusIcon())
     );
+    // v6.6.1: 冗余保障 — onBibDirtyChange 回调绕过事件系统直接更新图标
+    onBibDirtyChange(() => this.updateBibStatusIcon());
     this.plugin.registerEvent(
       this.plugin.emitter.on('bibClean', async (freshContent?: string) => {
-        console.log("[HUD State Debug] ========== bibClean 事件触发 ==========");
+        DEBUG_HUD && console.log("[HUD State Debug] ========== bibClean 事件触发 ==========");
         this.updateBibStatusIcon();
         // v6.5.4: 参考文献更新后同步刷新缓存，使用传递的最新文档内容避免从磁盘读取旧内容
         const file = this.plugin.app.workspace.getActiveFile();
         if (file) {
-          console.log("[HUD State Debug] bibClean: 准备刷新缓存，文件:", file.path);
+          DEBUG_HUD && console.log("[HUD State Debug] bibClean: 准备刷新缓存，文件:", file.path);
           await this.refreshCitationCachesAfterSync(file, freshContent);
-          console.log("[HUD State Debug] bibClean: 缓存刷新完成");
+          DEBUG_HUD && console.log("[HUD State Debug] bibClean: 缓存刷新完成");
         } else {
-          console.log("[HUD State Debug] bibClean: 无活跃文件，跳过缓存刷新");
+          DEBUG_HUD && console.log("[HUD State Debug] bibClean: 无活跃文件，跳过缓存刷新");
         }
       })
     );
@@ -462,83 +493,95 @@ export class SyncFloatingButton {
    *   focus + 任意脏        → 纯视觉提示，绝不自动同步
    */
   private async silentDiffCheck(file: TFile, trigger: 'file-open' | 'focus') {
-    console.log("[HUD State Debug] ========== silentDiffCheck() 开始执行 ==========");
-    console.log("[HUD State Debug] 检测文件:", file.path);
-    console.log("[HUD State Debug] 触发来源:", trigger);
-    console.log("[HUD State Debug] 当前活跃文件:", this.plugin.app.workspace.getActiveFile()?.path || "无");
+    DEBUG_HUD && console.log("[HUD State Debug] ========== silentDiffCheck() 开始执行 ==========");
+    DEBUG_HUD && console.log("[HUD State Debug] 检测文件:", file.path);
+    DEBUG_HUD && console.log("[HUD State Debug] 触发来源:", trigger);
+    DEBUG_HUD && console.log("[HUD State Debug] 当前活跃文件:", this.plugin.app.workspace.getActiveFile()?.path || "无");
 
     // v6.5.1: 防止旧文件的检测结果污染新文件
     const currentFile = this.plugin.app.workspace.getActiveFile();
     if (currentFile?.path !== file.path) {
-      console.log("[HUD State Debug] 文件已切换，取消检测 - 目标:", file.path, "当前:", currentFile?.path);
+      DEBUG_HUD && console.log("[HUD State Debug] 文件已切换，取消检测 - 目标:", file.path, "当前:", currentFile?.path);
       return;
     }
 
     // v6.5.0: 互斥锁 — 防止同一文件并发 diff 导致假阳性
     if (SyncFloatingButton.diffInFlightSet.has(file.path)) {
-      console.log("[HUD State Debug] 互斥锁阻止 - 该文件正在检测中");
+      DEBUG_HUD && console.log("[HUD State Debug] 互斥锁阻止 - 该文件正在检测中");
       return;
     }
     SyncFloatingButton.diffInFlightSet.add(file.path);
     try {
       const citeKey = this.extractCiteKeyFromFile(file);
       if (!citeKey) {
-        console.log("[HUD State Debug] 未找到 citeKey，提前返回");
+        DEBUG_HUD && console.log("[HUD State Debug] 未找到 citeKey，提前返回");
         return;
       }
 
       // ── 引注检测：正文citekey vs 参考文献区块三层严格对账 ──
 	      let citationDirty = false;
-	      console.log("[HUD State Debug] ========== 开始引注检测 ==========");
+	      DEBUG_HUD && console.log("[HUD State Debug] ========== 开始引注检测 ==========");
 	      try {
-	        // 优先从活跃编辑器视图读取内容（与基线来源一致），杜绝 cachedRead 滞后
-	        const editorView = getActiveEditorView();
-	        const editorContent = editorView?.state.doc.toString();
-	        const docContent = editorContent ?? await this.plugin.app.vault.read(file);
+        // ★ v6.6.1: 直接使用 vault.read() 读取文件内容，不使用 getActiveEditorView()。
+        // getActiveEditorView() 返回的 _activeView 由 CM6 ViewPlugin toDOM() 设置，
+        // 多窗格场景下可能指向非目标文件的编辑器，导致读到错误内容。
+        const docContent = await this.plugin.app.vault.read(file);
+        // v6.5.1: 异步操作后检查文件是否已切换
+        if (this.plugin.app.workspace.getActiveFile()?.path !== file.path) {
+          DEBUG_HUD && console.log("[HUD State Debug] 文件已切换（读取文件后），取消引注检测");
+          return;
+        }
+
+        const bodyKeys = await this.extractBodyCiteKeys(file, docContent);
 
 	        // v6.5.1: 异步操作后检查文件是否已切换
 	        if (this.plugin.app.workspace.getActiveFile()?.path !== file.path) {
-	          console.log("[HUD State Debug] 文件已切换（读取文件后），取消引注检测");
-	          return;
-	        }
-
-	        const bodyKeys = await this.extractBodyCiteKeys(file, docContent);
-
-	        // v6.5.1: 异步操作后检查文件是否已切换
-	        if (this.plugin.app.workspace.getActiveFile()?.path !== file.path) {
-	          console.log("[HUD State Debug] 文件已切换（提取引注后），取消引注检测");
+	          DEBUG_HUD && console.log("[HUD State Debug] 文件已切换（提取引注后），取消引注检测");
 	          return;
 	        }
 
 	        const bodySig = bodyKeys.join('|');
-	        console.log("[HUD State Debug] 引注检测 - bodyKeys数量:", bodyKeys.length, "bodySig:", bodySig);
+	        DEBUG_HUD && console.log("[HUD State Debug] 引注检测 - bodyKeys数量:", bodyKeys.length, "bodySig:", bodySig);
 	        const refCount = await this.countReferenceEntries(file, docContent);
 
         // v6.5.1: 异步操作后检查文件是否已切换
         if (this.plugin.app.workspace.getActiveFile()?.path !== file.path) {
-          console.log("[HUD State Debug] 文件已切换（计算参考文献数量后），取消引注检测");
+          DEBUG_HUD && console.log("[HUD State Debug] 文件已切换（计算参考文献数量后），取消引注检测");
           return;
         }
 	        // ── 提前计算 refHash（提纯版）与缓存基线 ──
 	        const refHash = await this.computeReferencesHash(file, docContent);
         // ★ 从持久化缓存读取上次同步后的基线（修复 storedSig/storedRefHash 未赋值 Bug）
         const storedSig = SyncFloatingButton.citekeySignatureCache.get(file.path);
-        const storedRefHash = SyncFloatingButton.referencesHashCache.get(file.path);
-        console.log("[HUD State Debug] 引注检测 - storedSig:", storedSig, "bodySig:", bodySig);
+        let storedRefHash = SyncFloatingButton.referencesHashCache.get(file.path);
+        // v6.6.1: referencesHashCache 可能为 undefined（基线由 cm6LivePreview.compute()
+        // 只写入了 _refHashCache 而未同步 referencesHashCache），回退读取 _refHashCache。
+        // 若继续 fallback 到 _refHashCache，还需要检查该基线是否匹配当前内容（防止
+        // "首次访问"分支误将已修改内容写入基线并 markBibClean）。
+        if (storedRefHash === undefined) {
+          const bibRefHash = getLastRefHash(file.path);
+          console.log("[HUD Diff] silentDiffCheck: referencesHashCache 为空, _refHashCache 回退值 =", bibRefHash);
+          if (bibRefHash !== null && bibRefHash !== undefined) {
+            storedRefHash = bibRefHash;
+            SyncFloatingButton.referencesHashCache.set(file.path, bibRefHash);
+          }
+        }
+        console.log("[HUD Diff] 引注检测 - storedSig:", storedSig, "bodySig:", bodySig);
         // v6.5.1: 异步操作后检查文件是否已切换
         if (this.plugin.app.workspace.getActiveFile()?.path !== file.path) {
-          console.log("[HUD State Debug] 文件已切换（计算参考文献哈希后），取消引注检测");
+          DEBUG_HUD && console.log("[HUD State Debug] 文件已切换（计算参考文献哈希后），取消引注检测");
           return;
         }
-        console.log("[HUD State Debug] 引注检测 - storedRefHash:", storedRefHash, "refHash:", refHash);
-        console.log("[HUD State Debug] 引注检测 - bodyKeys.length:", bodyKeys.length, "refCount:", refCount);
+        DEBUG_HUD && console.log("[HUD State Debug] 引注检测 - storedRefHash:", storedRefHash, "refHash:", refHash);
+        DEBUG_HUD && console.log("[HUD State Debug] 引注检测 - bodyKeys.length:", bodyKeys.length, "refCount:", refCount);
 
         // ── 终极断言：提纯签名与提纯哈希同时匹配 → 绝对 clean ──
+        console.log("[HUD Diff] 比较 - storedSig:", storedSig, "storedRefHash:", storedRefHash, "bodySig:", bodySig, "refHash:", refHash, "bodyKeys:", bodyKeys.length, "refCount:", refCount);
         // 无论数量是否对等，只要纯 citekey 签名不变 + 纯条目哈希不变，
         // 就证明用户未增删引注、未改参考文献，绝对禁止亮橙灯。
         if (storedSig !== undefined && storedRefHash !== undefined &&
             storedSig === bodySig && storedRefHash === refHash) {
-          console.log("[HUD State Debug] 引注检测结果：签名和哈希完全匹配 → markBibClean()");
+          console.log("[HUD Diff] → 分支1: sig+hash匹配 → markBibClean");
           markBibClean();
         } else if (bodyKeys.length === 0 && refCount === 0) {
           // v6.5.4: 空引注空参考文献 → 无条件标记 clean + 清空基线缓存
@@ -546,10 +589,10 @@ export class SyncFloatingButton {
           //   即使 cm6LivePreview 在异步间隙基于过期 _signatureCache 误调用了 markBibDirty()，
           //   本函数通过真实文件内容扫描得出的 bodyKeys=0+refCount=0 是权威结论，
           //   应覆盖任何中间状态的脏标志。若用户正在键入引注，cm6LivePreview 下一帧会重新标记。
-          console.log("[HUD State Debug] 引注检测结果：无引注无参考文献 → 强制 markBibClean()");
+          console.log("[HUD Diff] → 分支2: 空引注空参考文献 → markBibClean");
           // 先强制重置脏标志（覆盖异步间隙中被错误设置的 dirty），再标记 clean
           if (isBibOutOfSync) {
-            console.log("[HUD State Debug] 检测到异步间隙脏标志，强制覆盖");
+            DEBUG_HUD && console.log("[HUD State Debug] 检测到异步间隙脏标志，强制覆盖");
           }
           markBibClean();
           SyncFloatingButton.citekeySignatureCache.set(file.path, '');
@@ -558,31 +601,33 @@ export class SyncFloatingButton {
           clearLastRefHash(file.path);
         } else if (bodyKeys.length !== refCount) {
           // 第1层：数量不对等 → dirty
-          console.log("[HUD State Debug] 引注检测结果：数量不对等 → markBibDirty()");
+          console.log("[HUD Diff] → 分支3: 数量不对等 → markBibDirty");
           markBibDirty();
           citationDirty = true;
         } else if (storedSig && storedSig !== bodySig) {
           // 第2层：citekey 签名变更 → dirty（空字符串视为无基线，不触发此分支）
-          console.log("[HUD State Debug] 引注检测结果：签名变更 → markBibDirty()");
+          console.log("[HUD Diff] → 分支4: 签名变更 → markBibDirty");
           markBibDirty();
           citationDirty = true;
-        } else if (storedRefHash === undefined && (bodyKeys.length > 0 || refCount > 0)) {
-          // 首次：存储基线（排除无引注无参考文献的情况，避免与 561 行分支冲突）
-          console.log("[HUD State Debug] 引注检测结果：首次访问，存储基线 → markBibClean()");
+        } else if (storedSig === undefined && (bodyKeys.length > 0 || refCount > 0)) {
+          // 首次访问：存储基线（排除无引注无参考文献的情况）。
+          // ★ v6.6.1: 使用 storedSig 而非 storedRefHash 判断首次访问，
+          // 因为 _refHashCache 回退可能已给 storedRefHash 赋值，导致漏过。
+          // 不调用 markBibClean()——若 cm6LivePreview 已检测到修改并标记 dirty，
+          // 此处的 markBibClean 会错误覆盖脏状态。
+          console.log("[HUD Diff] → 分支5: 首次访问 → 仅存储基线");
           if (refHash) {
             SyncFloatingButton.referencesHashCache.set(file.path, refHash);
-            // ★ 同步 _refHashCache，确保 cm6LivePreview light gate 能读到基线
             setLastRefHash(file.path, refHash);
           }
           SyncFloatingButton.citekeySignatureCache.set(file.path, bodySig);
-          markBibClean();
         } else if (storedRefHash !== refHash) {
           // 区块被修改 → dirty
-          console.log("[HUD State Debug] 引注检测结果：参考文献区块被修改 → markBibDirty()");
+          console.log("[HUD Diff] → 分支6: 参考文献被修改 → markBibDirty");
           markBibDirty();
           citationDirty = true;
         } else {
-          console.log("[HUD State Debug] 引注检测结果：其他情况 → markBibClean()");
+          console.log("[HUD Diff] → 分支7: 其他情况 → markBibClean");
           markBibClean();
         }
       } catch { /* 引注解析失败，跳过 */ }
@@ -595,16 +640,16 @@ export class SyncFloatingButton {
       const currentHash = await this.computeMetadataHash(citeKey, file);
       if (currentHash) {
         const storedHash = metadataSyncHashCache.get(file.path);
-        console.log("[HUD State Debug] 元数据检测 - storedHash:", storedHash, "currentHash:", currentHash);
+        DEBUG_HUD && console.log("[HUD State Debug] 元数据检测 - storedHash:", storedHash, "currentHash:", currentHash);
         if (storedHash === undefined) {
-          console.log("[HUD State Debug] 元数据缓存未命中，标记为已同步");
+          DEBUG_HUD && console.log("[HUD State Debug] 元数据缓存未命中，标记为已同步");
           markMetadataSynced(file.path, currentHash, this.plugin.emitter);
         } else if (storedHash !== currentHash) {
-          console.log("[HUD State Debug] 元数据哈希不匹配，标记为脏");
+          DEBUG_HUD && console.log("[HUD State Debug] 元数据哈希不匹配，标记为脏");
           checkMetadataDirty(file.path, currentHash, this.plugin.emitter, true);
           metadataDirty = true;
         } else {
-          console.log("[HUD State Debug] 元数据哈希匹配，标记为已同步");
+          DEBUG_HUD && console.log("[HUD State Debug] 元数据哈希匹配，标记为已同步");
           markMetadataSynced(file.path, currentHash, this.plugin.emitter);
         }
       }
@@ -744,12 +789,15 @@ export class SyncFloatingButton {
    */
   private updateBibStatusIcon() {
     const wrap = this.iconWrap;
+    console.log("[HUD Icon Debug] updateBibStatusIcon() 被调用, iconWrap 存在:", !!wrap, "isBibOutOfSync:", isBibOutOfSync, "isMetadataOutOfSync:", isMetadataOutOfSync);
     if (!wrap) return;
     const dirty = isBibOutOfSync || isMetadataOutOfSync;
     if (dirty) {
+      console.log("[HUD Icon Debug] 设置图标为 file-pen (脏)");
       setIcon(wrap, 'file-pen');
       this.applyWarningRing(true);
     } else {
+      console.log("[HUD Icon Debug] 设置图标为 file-text (净)");
       setIcon(wrap, 'file-text');
       if (!this.isProgressing) this.applyWarningRing(false);
     }
@@ -1200,26 +1248,26 @@ export class SyncFloatingButton {
    *   vault.read() 可能读到旧内容）。不传时回退到 vault.read()。
    */
   async refreshCitationCachesAfterSync(file: TFile, preReadContent?: string) {
-    console.log("[HUD State Debug] refreshCitationCachesAfterSync: 开始刷新缓存");
+    DEBUG_HUD && console.log("[HUD State Debug] refreshCitationCachesAfterSync: 开始刷新缓存");
     // v6.5.4: 只使用传入的内容或从磁盘读取，不从编辑器读取（编辑器内容可能不可靠）
     const freshContent = preReadContent ?? await this.plugin.app.vault.read(file);
     const sig = await this.computeCiteKeySignature(file, freshContent);
     SyncFloatingButton.citekeySignatureCache.set(file.path, sig);
-    console.log("[HUD State Debug] refreshCitationCachesAfterSync: 更新 citekeySignatureCache =", sig);
+    DEBUG_HUD && console.log("[HUD State Debug] refreshCitationCachesAfterSync: 更新 citekeySignatureCache =", sig);
     const refHash = await this.computeReferencesHash(file, freshContent);
-    console.log("[HUD State Debug] refreshCitationCachesAfterSync: 计算 refHash =", refHash);
+    DEBUG_HUD && console.log("[HUD State Debug] refreshCitationCachesAfterSync: 计算 refHash =", refHash);
     // v6.5.3: 当 refHash 为 null 时删除缓存，防止旧值污染
     if (refHash) {
       SyncFloatingButton.referencesHashCache.set(file.path, refHash);
       setLastRefHash(file.path, refHash);
-      console.log("[HUD State Debug] refreshCitationCachesAfterSync: 设置 referencesHashCache =", refHash);
+      DEBUG_HUD && console.log("[HUD State Debug] refreshCitationCachesAfterSync: 设置 referencesHashCache =", refHash);
     } else {
       SyncFloatingButton.referencesHashCache.delete(file.path);
       clearLastRefHash(file.path);
-      console.log("[HUD State Debug] refreshCitationCachesAfterSync: 删除 referencesHashCache");
+      DEBUG_HUD && console.log("[HUD State Debug] refreshCitationCachesAfterSync: 删除 referencesHashCache");
     }
     // v6.5.3: 不调用 markBibClean()，因为此方法已经在 bibClean 事件回调中，状态已经是 clean
-    console.log("[HUD State Debug] refreshCitationCachesAfterSync: 缓存刷新完成，跳过 markBibClean()");
+    DEBUG_HUD && console.log("[HUD State Debug] refreshCitationCachesAfterSync: 缓存刷新完成，跳过 markBibClean()");
   }
 
   /** v6.5.0: 手动智能同步 — 无条件绕过签名拦截器，执行完整流程 */
@@ -1374,8 +1422,10 @@ export class SyncFloatingButton {
 
   /** v6.5.0: 定位参考文献标题在文档中的安全区 */
   private findReferencesZone(content: string): { from: number; to: number } | null {
-    // 匹配 # 参考文献 或 ## 参考文献 等 Markdown 标题
-    const headingRe = /^#{1,3}\s+参考文献\s*$/m;
+    // ★ v6.6.1: 使用动态标题（与 bibliographyWriter 一致），不再硬编码
+    const heading = getBibliographyHeading();
+    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const headingRe = new RegExp(`^#{1,3}\\s+${escaped}\\s*$`, 'm');
     const m = headingRe.exec(content);
     if (!m) return null;
     const headingLevel = (m[0].match(/^#+/)!)[0].length;

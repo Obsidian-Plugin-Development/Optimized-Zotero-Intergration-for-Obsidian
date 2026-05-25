@@ -28,7 +28,7 @@ import type ZoteroConnector from '../main';
 import type { CitationEngine } from './citationEngine';
 import { updateCitationStore, unifiedScanDocument } from './citationStore';
 import type { UnifiedScanResult } from './citationStore';
-import { isBibOutOfSync, markBibDirty, markBibClean, getLastCitationSignature, setLastCitationSignature, getLastRefHash, setLastRefHash, computeRefSectionHash } from './bibliographyWriter';
+import { isBibOutOfSync, markBibDirty, markBibClean, getLastCitationSignature, setLastCitationSignature, getLastRefHash, setLastRefHash, clearLastRefHash, computeRefSectionHash } from './bibliographyWriter';
 
 // ── 模块级闭包引用 ──
 let _engine: CitationEngine;
@@ -206,10 +206,19 @@ class CitationPluginValue implements PluginValue {
 			}
 			return;
 		}
-		if (update.viewportChanged || update.selectionSet) {
+		if (update.viewportChanged || update.selectionSet || update.focusChanged) {
 			// ★ v7.3: 复用缓存扫描结果，仅重建可见区装饰
 			if (this.cachedScan && this.cachedScan.positions.length > 0) {
 				this.decorations = this.buildDecorationsFromCache();
+			}
+		// v6.6.1: 视图重新可见时同步检查 refHash 和引注签名。
+				// docChanged=false 时不会进入 compute/checkRefSectionIntegrity，
+				// 但引注或参考文献可能在用户切走前已被手动修改。
+				// 两路均为纯同步比对（缓存签名 / refHash），无需等待异步 I/O，
+				// 确保标签页切换时悬浮球状态即时响应。
+			if (update.viewportChanged || update.focusChanged) {
+				this.checkRefSectionIntegrity(update);
+				this.checkCitationSignatureIntegrity();
 			}
 		}
 	}
@@ -301,14 +310,52 @@ class CitationPluginValue implements PluginValue {
 		}
 
 		// ★ 恢复检测：脏状态 + 哈希已恢复 → 撤销/重做恢复
-		// v7.3.1: 直接对当前文档计算引注签名，不依赖 this.cachedScan（可能过时）
+		// v6.6.1: 优先使用 this.cachedScan.signature（unifiedScanDocument 规范实现），
+		// 仅当缓存不可用或 docText 已变更时才回退到 computeQuickCitationSignature
 		if (isBibOutOfSync && currentRefHash === cachedRefHash) {
 			const cachedSignature = getLastCitationSignature(filePath);
-			const currentSignature = computeQuickCitationSignature(docText);
+			let currentSignature: string;
+			if (this.cachedScan && this.cachedDocText === docText) {
+				currentSignature = this.cachedScan.signature;
+			} else {
+				currentSignature = computeQuickCitationSignature(docText);
+			}
 			if (cachedSignature === null || currentSignature === cachedSignature) {
 				console.log('[cm6LivePreview] 检测到参考文献区块恢复至基线（轻量门控路径），标记 clean');
 				markBibClean();
 				try { _plugin.emitter.trigger('bibClean'); } catch { /* 静默 */ }
+			}
+		}
+	}
+	/**
+	 * v6.6.1: 视图重可见时同步检测引注签名变化。
+	 *
+	 * 纯同步比对（优先复用 cachedScan.signature，回退 computeQuickCitationSignature），
+	 * 无需异步 I/O，确保切回标签页时引注变化也能立即反映到悬浮球状态。
+	 *
+	 * 与 compute() 中的签名检测逻辑一致，但仅做签名比对，不触发全文档重扫。
+	 */
+	private checkCitationSignatureIntegrity() {
+		const filePath = _plugin?.app?.workspace?.getActiveFile()?.path || "";
+		const cachedSignature = getLastCitationSignature(filePath);
+		if (cachedSignature === null) return; // 无基线，跳过（首次访问由 compute/silentDiffCheck 建立基线）
+
+		const docText = this.view.state.doc.toString();
+		let currentSignature: string;
+		if (this.cachedScan && this.cachedDocText === docText) {
+			currentSignature = this.cachedScan.signature;
+		} else {
+			currentSignature = computeQuickCitationSignature(docText);
+		}
+
+		if (currentSignature !== cachedSignature) {
+			console.log("[cm6LivePreview] 检测到引注签名变化（视图重可见路径）");
+			if (currentSignature === "") {
+				markBibClean(true);
+				clearLastRefHash(filePath);
+			} else {
+				markBibDirty();
+				try { _plugin.emitter.trigger("bibDirty"); } catch { /* 静默 */ }
 			}
 		}
 	}
@@ -356,6 +403,9 @@ class CitationPluginValue implements PluginValue {
 			if (currentSignature === "") {
 				console.log("[cm6LivePreview] 检测到所有引注已删除，标记 clean（静默，保留基线）");
 				markBibClean(true);
+				// v6.6.1: 同时清除 refHash 基线，防止下方 refHash 检查因
+				// currentRefHash === null 而误触发 markBibDirty 覆盖 clean 状态
+				clearLastRefHash(filePath);
 			} else {
 				markBibDirty();
 				try { _plugin.emitter.trigger("bibDirty"); } catch { /* 静默 */ }
@@ -365,7 +415,8 @@ class CitationPluginValue implements PluginValue {
 		// v7.1: 参考文献区块实时完整性检测
 		const currentRefHash = computeRefSectionHash(docText);
 		const cachedRefHash = getLastRefHash(filePath);
-		if (cachedRefHash !== null && currentRefHash !== null && currentRefHash !== cachedRefHash) {
+		// v6.6.1: 去掉 currentRefHash !== null 前置条件，覆盖用户删除整个参考文献区块的场景
+		if (cachedRefHash !== null && currentRefHash !== cachedRefHash) {
 			console.log('[cm6LivePreview] 检测到参考文献区块被手动修改');
 			markBibDirty();
 			try { _plugin.emitter.trigger('bibDirty'); } catch { /* 静默 */ }
