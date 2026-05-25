@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.6.1",
+	"version": "6.6.2",
 	"minAppVersion": "1.1.1",
-	"description": "v6.6.1: Zotero窗口智能管理 + 参考文献删除实时检测 + 调试日志收口 — IsIconic 最小化前检查 + compute() 区块删除漏检修复 + 双签名来源统一",
+	"description": "v6.6.2: 调试日志清理 + 编辑弹窗拖拽排序与[?]闪烁修复",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true

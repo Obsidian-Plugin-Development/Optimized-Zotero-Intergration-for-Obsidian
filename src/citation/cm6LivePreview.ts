@@ -120,7 +120,7 @@ function computeQuickCitationSignature(docText: string): string {
 			.filter(Boolean);
 		keys.push(...rawKeys);
 	}
-	return [...new Set(keys)].sort().join(',');
+	return [...new Set(keys)].join(',');
 }
 
 /**

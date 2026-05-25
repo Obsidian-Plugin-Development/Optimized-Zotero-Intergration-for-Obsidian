@@ -81,13 +81,23 @@ export class CitationEditModal extends Modal {
 		initialKeys: string[] = [],
 		startIndex: number = 1,
 	) {
-		super(app);
-		this.citeKeys = [...initialKeys];
-		this.startIndex = startIndex;
+			super(app);
+			// ★ v6.6.2: 按全局序号排序 citeKeys，使显示顺序与编号一致。
+			// 拖拽排序直接操作 this.citeKeys 顺序，不再依赖 renderCards 中的排序。
+			const engine = plugin.citationEngine;
+			this.citeKeys = [...initialKeys].sort((a, b) => {
+				const na = engine.getNumber(a) || 0;
+				const nb = engine.getNumber(b) || 0;
+				if (na === 0 && nb === 0) return 0;
+				if (na === 0) return 1;
+				if (nb === 0) return -1;
+				return na - nb;
+			});
+			this.startIndex = engine.getNumber(this.citeKeys[0]) || startIndex;
 
-		// 计算哪些 citekey 是历史引用（锁定状态）
-		this.computeLockedKeys();
-	}
+			// 计算哪些 citekey 是历史引用（锁定状态）
+			this.computeLockedKeys();
+		}
 
 	/**
 	 * 计算哪些 citekey 是历史引用（在当前编辑位置之前已出现过）。
@@ -275,34 +285,26 @@ export class CitationEditModal extends Modal {
 		const engine = this.plugin.citationEngine;
 		const missingKeys: string[] = [];
 
-		// ★★★ 绝杀数据错位 Bug：按全局序号排序，但保持 citekey 唯一锚点 ★★★
-		const sortedEntries = this.citeKeys
-			.map((key, originalIndex) => ({
-				key,
-				originalIndex, // 保留原始索引用于拖拽
-				globalNumber: engine.getNumber(key),
-			}))
-			.sort((a, b) => {
-				// 序号为 0 的放最后
-				if (a.globalNumber === 0 && b.globalNumber === 0) return 0;
-				if (a.globalNumber === 0) return 1;
-				if (b.globalNumber === 0) return -1;
-				return a.globalNumber - b.globalNumber;
-			});
+		// ★ v6.6.2: citeKeys 已在构造函数中按 globalNumber 排序，此处直接使用其顺序。
+			// 不再排序，使拖拽修改 citeKeys 顺序后能立即反映到显示。
+			const entries = this.citeKeys.map((key, index) => ({ key, index }));
 
-		// ★★★ 关键修复：使用 key 作为唯一锚点获取元数据 ★★★
-		for (const entry of sortedEntries) {
-			const { key, originalIndex } = entry;
-			// 通过 key 获取元数据，确保数据绑定正确
+			// ★ v6.6.2: 更新 startIndex，使拖拽后编号基于位置重新计算
+			const firstKeyNum = engine.getNumber(this.citeKeys[0]);
+			if (firstKeyNum > 0) this.startIndex = firstKeyNum;
+
+			// ★★★ 关键修复：使用 key 作为唯一锚点获取元数据 ★★★
+			for (const entry of entries) {
+			const { key, index } = entry;
 			const item = engine.getIndividualJsonCached(key);
 
 			if (item) {
-				this.renderCard(originalIndex, key, 0, item);
+				this.renderCard(index, key, 0, item);
 			} else {
 				missingKeys.push(key);
-				this.renderPlaceholderCard(originalIndex, key, 0);
+				this.renderPlaceholderCard(index, key, 0);
 			}
-		}
+			}
 
 		if (missingKeys.length > 0) {
 			// ★ v7.3: 事件驱动替代 200ms 轮询
@@ -344,8 +346,10 @@ export class CitationEditModal extends Modal {
 	private renderCard(index: number, key: string, _ignoredNumber: number, item: any) {
 		const isLocked = this.lockedKeys.has(key);
 
-		// ★ 从全局 Registry 获取序号（SSOT - Single Source of Truth）
-		const globalNumber = this.plugin.citationEngine.getNumber(key);
+		// ★ v6.6.2: 基于 citeKeys 位置计算编号（拖拽后立即反映新顺序）
+		const globalNumber = this.lockedKeys.has(key)
+			? (this.plugin.citationEngine.getNumber(key) || this.startIndex + index)
+			: this.startIndex + index;
 
 		const card = this.cardContainer.createDiv('citation-edit-card');
 		card.setAttribute('data-index', String(index));
@@ -427,8 +431,10 @@ export class CitationEditModal extends Modal {
 	private renderPlaceholderCard(index: number, key: string, _ignoredNumber: number) {
 		const isLocked = this.lockedKeys.has(key);
 
-		// ★ 从全局 Registry 获取序号（SSOT）
-		const globalNumber = this.plugin.citationEngine.getNumber(key);
+		// ★ v6.6.2: 基于 citeKeys 位置计算编号（拖拽后立即反映新顺序）
+		const globalNumber = this.lockedKeys.has(key)
+			? (this.plugin.citationEngine.getNumber(key) || this.startIndex + index)
+			: this.startIndex + index;
 
 		const card = this.cardContainer.createDiv(
 			'citation-edit-card citation-edit-card-loading',
@@ -492,8 +498,10 @@ export class CitationEditModal extends Modal {
 	private buildCardElement(index: number, key: string, _ignoredNumber: number, item: any): HTMLElement {
 		const isLocked = this.lockedKeys.has(key);
 
-		// ★ 从全局 Registry 获取序号（SSOT）
-		const globalNumber = this.plugin.citationEngine.getNumber(key);
+		// ★ v6.6.2: 基于 citeKeys 位置计算编号（拖拽后立即反映新顺序）
+		const globalNumber = this.lockedKeys.has(key)
+			? (this.plugin.citationEngine.getNumber(key) || this.startIndex + index)
+			: this.startIndex + index;
 
 		const card = createDiv('citation-edit-card');
 		card.setAttribute('data-index', String(index));
@@ -711,6 +719,16 @@ export class CitationEditModal extends Modal {
 					this.citeKeys.push(item.key);
 				}
 			}
+			// ★ v6.6.2: 添加后排序，使显示顺序与编号一致（拖拽排序同理）
+			const engine = this.plugin.citationEngine;
+			this.citeKeys.sort((a, b) => {
+				const na = engine.getNumber(a) || 0;
+				const nb = engine.getNumber(b) || 0;
+				if (na === 0 && nb === 0) return 0;
+				if (na === 0) return 1;
+				if (nb === 0) return -1;
+				return na - nb;
+			});
 
 			// ★★★ 关键修复：添加文献后立即重新计算锁定状态 ★★★
 			// 这确保新添加的历史文献立即被锁定，无需关闭弹窗重新打开
@@ -769,7 +787,8 @@ export class CitationEditModal extends Modal {
 		// 这确保了首次出场文献的拖拽顺序立即反映到全局序号中
 		// 从而实现"编辑弹窗 -> 参考文献列表 -> HUD 状态"的三端同步
 		requestAnimationFrame(() => {
-			this.plugin.citationEngine.scanDocument(this.view);
+			const docText = this.view.state.doc.toString();
+			this.plugin.citationEngine.scanDocument(docText);
 		});
 
 		this.close();

@@ -84,7 +84,7 @@ export function unifiedScanDocument(docText: string): UnifiedScanResult {
 	}
 
 	// ★ 签名：Set 去重 + 排序，确保相同集合生成相同签名
-	const signature = [...new Set(allKeys)].sort().join(',');
+	const signature = [...new Set(allKeys)].join(',');
 
 	return { positions, signature, keyToNumber, keyPositions, sortedUniqueKeys };
 }

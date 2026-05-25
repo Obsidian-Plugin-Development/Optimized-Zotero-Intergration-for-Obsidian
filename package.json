@@ -1,6 +1,6 @@
 {
   "name": "optimized-zotero-integration",
-  "version": "6.6.1",
+  "version": "6.6.2",
   "description": "基于 mgmeyers/obsidian-zotero-integration 优化的 Obsidian Zotero 集成插件，支持 YAML Frontmatter 属性合并",
   "main": "main.js",
   "scripts": {
