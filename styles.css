@@ -712,9 +712,9 @@
     border: none !important;
     outline: none !important;
     box-shadow: none;
-    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
-                box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
-                background-color 0.3s ease;
+    transition: transform 0.18s cubic-bezier(0.25, 0.8, 0.25, 1),
+                box-shadow 0.18s cubic-bezier(0.25, 0.8, 0.25, 1),
+                background-color 0.18s ease;
 }
 
 /* ── 防御性铲除：禁止 ::before 伪元素残留造成孤立横线 ── */
@@ -735,7 +735,7 @@
 .sync-floating-wrapper.is-idle.has-updates-ring .sync-progress-ring {
     opacity: 1;
     visibility: visible;
-    transition: opacity 0.3s ease-out,
+    transition: opacity 0.18s ease-out,
                 visibility 0s linear 0s;
 }
 .sync-floating-wrapper.is-idle.has-updates-ring .sync-ring-fill {
@@ -763,10 +763,10 @@
 /* ── v6.6.5: Zotero 不可达 — 悬浮球图标缓慢闪烁 ── */
 @keyframes zoteroUnreachableBlink {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
+    50% { opacity: 0.3; }
 }
 .sync-floating-wrapper.zotero-unreachable .sync-icon-wrap {
-    animation: zoteroUnreachableBlink 2.4s ease-in-out infinite;
+    animation: zoteroUnreachableBlink 1.5s ease-in-out infinite;
     color: var(--text-muted) !important;
 }
 
@@ -809,7 +809,7 @@
 .sync-floating-wrapper.is-progressing .sync-progress-ring {
     opacity: 1;
     visibility: visible;
-    transition: opacity 0.3s ease-out,
+    transition: opacity 0.18s ease-out,
                 visibility 0s linear 0s;
 }
 
@@ -818,9 +818,9 @@
     position: relative;
     border-radius: 50%;
     overflow: hidden;
-    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
-                box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
-                background-color 0.3s ease;
+    transition: transform 0.18s cubic-bezier(0.25, 0.8, 0.25, 1),
+                box-shadow 0.18s cubic-bezier(0.25, 0.8, 0.25, 1),
+                background-color 0.18s ease;
 }
 
 /* ── SVG 进度环容器 ── */
@@ -835,8 +835,8 @@
     transform: rotate(-90deg);
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.3s ease-out,
-                visibility 0s linear 0.3s;
+    transition: opacity 0.18s ease-out,
+                visibility 0s linear 0.18s;
     pointer-events: none;
 }
 
@@ -850,7 +850,7 @@
 /* ── SVG 填充环（紫色、严格扁平、丝滑颜色过渡）── */
 .sync-ring-fill {
     stroke: var(--interactive-accent);
-    transition: stroke 0.3s ease-out;
+    transition: stroke 0.18s ease-out;
     box-shadow: none !important;
     filter: none !important;
 }
@@ -871,8 +871,8 @@
     opacity: 1;
     visibility: visible;
     transform: scale(1);
-    transition: opacity 0.3s ease-out,
-                transform 0.3s ease-out,
+    transition: opacity 0.18s ease-out,
+                transform 0.18s ease-out,
                 visibility 0s linear 0s;
 }
 .sync-floating-wrapper.is-loading .sync-floating-button .sync-icon-wrap,
@@ -881,9 +881,9 @@
     visibility: hidden;
     transform: scale(0.8);
     pointer-events: none;
-    transition: opacity 0.3s ease-out,
-                transform 0.3s ease-out,
-                visibility 0s linear 0.3s;
+    transition: opacity 0.18s ease-out,
+                transform 0.18s ease-out,
+                visibility 0s linear 0.18s;
 }
 
 /* ── 第2层：中心百分比数字（loading 态可见）── */
@@ -900,17 +900,17 @@
     opacity: 0;
     visibility: hidden;
     transform: scale(0.8);
-    transition: opacity 0.3s ease-out,
-                transform 0.3s ease-out,
-                visibility 0s linear 0.3s;
+    transition: opacity 0.18s ease-out,
+                transform 0.18s ease-out,
+                visibility 0s linear 0.18s;
     pointer-events: none;
 }
 .sync-floating-wrapper.is-loading .sync-floating-button .sync-progress-text {
     opacity: 1;
     visibility: visible;
     transform: scale(1);
-    transition: opacity 0.3s ease-out,
-                transform 0.3s ease-out,
+    transition: opacity 0.18s ease-out,
+                transform 0.18s ease-out,
                 visibility 0s linear 0s;
 }
 
@@ -926,17 +926,17 @@
     opacity: 0;
     visibility: hidden;
     transform: scale(0.6);
-    transition: opacity 0.3s ease-out,
-                transform 0.3s ease-out,
-                visibility 0s linear 0.3s;
+    transition: opacity 0.18s ease-out,
+                transform 0.18s ease-out,
+                visibility 0s linear 0.18s;
     pointer-events: none;
 }
 .sync-floating-wrapper.is-success .sync-floating-button .sync-check-icon {
     opacity: 1;
     visibility: visible;
     transform: scale(1.1);
-    transition: opacity 0.3s ease-out,
-                transform 0.3s ease-out,
+    transition: opacity 0.18s ease-out,
+                transform 0.18s ease-out,
                 visibility 0s linear 0s;
 }
 

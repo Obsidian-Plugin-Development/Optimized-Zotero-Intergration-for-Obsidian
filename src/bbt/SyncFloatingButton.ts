@@ -328,6 +328,7 @@ export class SyncFloatingButton {
       w.removeClass('is-progressing');
       w.removeClass('is-loading');
       w.removeClass('is-success');
+      w.removeClass('zotero-unreachable');
       w.addClass('is-idle');
       w.removeAttribute('data-tooltip');
     }
