@@ -8,6 +8,7 @@ import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetad
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
 import { isZoteroUnreachable, onZoteroStateChange, probeZoteroRecovery } from './zoteroClient';
+import { getPort } from './helpers';
 /**
  * v5.0.1 磁吸悬浮同步球（Draggable Floating Action Button）
  *
@@ -1082,7 +1083,8 @@ export class SyncFloatingButton {
     }
 
     // v6.6.5: 点击时主动探测 Zotero 是否已恢复，避免等待下一轮心跳（最多 25s）
-    probeZoteroRecovery(this.plugin.settings.port);
+    const port = getPort(this.plugin.settings.database, this.plugin.settings.port);
+    probeZoteroRecovery(parseInt(port, 10));
 
     // v6.3.0-alpha.1: 菜单顺序 — 导入条目 / 更新条目 / 插入引注 / 更新文献
     const targets = this.plugin.settings.syncTargets || ['metadata'];
