@@ -7,7 +7,7 @@ import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, setLastRe
 import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetadataState, metadataSyncHashCache } from '../citation/metadataSyncDetector';
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
-import { isZoteroUnreachable, onZoteroStateChange, probeZoteroRecovery, dismissZoteroUnreachable } from './zoteroClient';
+import { isZoteroUnreachable, onZoteroStateChange, probeZoteroRecovery, setZoteroUnreachable } from './zoteroClient';
 import { getPort } from './helpers';
 /**
  * v5.0.1 磁吸悬浮同步球（Draggable Floating Action Button）
@@ -48,6 +48,7 @@ export class SyncFloatingButton {
   // 弹出菜单状态
   private menu: HTMLElement | null = null;
   private menuCleanup: (() => void) | null = null;
+  private menuWasZoteroUnreachable = false; // v6.6.5: 关闭菜单时恢复闪烁
 
   // 拖拽状态
   private dragging = false;
@@ -1084,10 +1085,10 @@ export class SyncFloatingButton {
       return;
     }
 
-    // v6.6.5: 记录 Zotero 状态（用于菜单静默提示），然后停止闪烁
-    const wasUnreachable = isZoteroUnreachable();
-    if (wasUnreachable) {
-      dismissZoteroUnreachable();
+    // v6.6.5: 记录 Zotero 状态用于菜单提示；暂停闪烁（关闭菜单后恢复）
+    this.menuWasZoteroUnreachable = isZoteroUnreachable();
+    if (this.menuWasZoteroUnreachable) {
+      setZoteroUnreachable(false); // 暂时停止闪烁，让用户操作
     }
 
     // v6.6.5: 点击时主动探测 Zotero 是否已恢复，避免等待下一轮心跳（最多 25s）
@@ -1110,7 +1111,7 @@ export class SyncFloatingButton {
     if (menuCommands.length === 1) {
       this.executeCommand(menuCommands[0]);
     } else {
-      this.showCommandMenu(menuCommands, wasUnreachable);
+      this.showCommandMenu(menuCommands, this.menuWasZoteroUnreachable);
     }
   }
 
@@ -1159,7 +1160,7 @@ export class SyncFloatingButton {
       hint.style.cssText = [
         'padding: 6px 18px',
         'font-size: 12px',
-        'color: var(--text-muted)',
+        'color: var(--text-error)',
         'border-top: 1px solid var(--background-modifier-border)',
         'margin-top: 4px',
         'padding-top: 8px',
@@ -1261,6 +1262,10 @@ export class SyncFloatingButton {
   }
 
   private closeMenu() {
+    // v6.6.5: 关闭菜单时若未执行操作且 Zotero 仍不可达 → 恢复闪烁
+    const shouldRestoreBlink = this.menuWasZoteroUnreachable;
+    this.menuWasZoteroUnreachable = false;
+
     if (this.menu) {
       this.menuCleanup?.();
       this.menu.style.opacity = '0';
@@ -1269,6 +1274,10 @@ export class SyncFloatingButton {
         this.menu?.remove();
         this.menu = null;
         this.menuCleanup = null;
+        // 延迟恢复闪烁，等菜单动画结束
+        if (shouldRestoreBlink) {
+          setZoteroUnreachable(true);
+        }
       }, 150);
     }
   }
@@ -1276,6 +1285,9 @@ export class SyncFloatingButton {
   // ── 命令执行 ──
 
   private async executeCommand(cmdId: string) {
+    // v6.6.5: 用户选择了操作 → 不再恢复闪烁（操作会自行更新 Zotero 状态）
+    this.menuWasZoteroUnreachable = false;
+
     // v6.0: 智能同步 — 需要当前文件
     if (cmdId === 'zdc-smart-sync') {
       const file = this.plugin.app.workspace.getActiveFile();
