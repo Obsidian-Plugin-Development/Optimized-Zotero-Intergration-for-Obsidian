@@ -22,6 +22,7 @@ import { createCitationPostProcessor } from './citation/readingMode';
 import { CitationPopoverManager } from './citation/hoverPopover';
 import { initBibliographyWriter, setBibliographyHeading, hasBibHeading, updateBibliographyText, markBibClean, initBibEmitter } from './citation/bibliographyWriter';
 import { initPowerShellBridge, disposePowerShellBridge } from './helpers';
+import { initZoteroClient, updateZoteroClientDatabase } from './bbt/zoteroClient';
 
 import './bbt/template.helpers';
 import { setLocale, t } from './locale/i18n';
@@ -123,6 +124,8 @@ export default class ZoteroConnector extends Plugin {
       );
       // 设置变更时清除引注缓存
       this.citationEngine?.invalidateCache();
+      // v6.6.3: 同步 Zotero 数据库类型到请求拦截层
+      updateZoteroClientDatabase(this.settings.database);
     });
 
     this.updatePDFUtility();
@@ -131,6 +134,7 @@ export default class ZoteroConnector extends Plugin {
 
     // ★ v7.4: 预保温 PowerShell 桥接 + 启动 Zotero 心跳探针
     initPowerShellBridge();
+    initZoteroClient(this.app, this.settings.database);
     startZoteroHeartbeat({
       database: this.settings.database,
       port: this.settings.port,

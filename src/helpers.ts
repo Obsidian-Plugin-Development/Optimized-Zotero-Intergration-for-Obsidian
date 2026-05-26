@@ -174,7 +174,7 @@ export function focusZotero(database: string = 'Zotero'): Promise<void> {
 
     try {
       psProcess.stdin!.write(
-        `$c=Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool AllowSetForegroundWindow(uint pid);' -Name 'W' -Namespace 'N' -PassThru;$s=Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);[DllImport("user32.dll")]public static extern bool IsIconic(IntPtr hWnd);' -Name 'S' -Namespace 'N' -PassThru;$p=Get-Process -Name '${appName}' -ErrorAction SilentlyContinue|Where-Object{$_.Id}|Select-Object -First 1;if($p){$c::AllowSetForegroundWindow($p.Id);$h=$p.MainWindowHandle;if($h){if(-not ($s::IsIconic($h))){$s::ShowWindow($h,6)}}};Write-Host '${PS_MARKER_PREFIX}${id}'\n`
+        `try{$c=Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool AllowSetForegroundWindow(uint pid);' -Name 'W' -Namespace 'N' -PassThru}catch{$c=[N.W]};try{$s=Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);[DllImport("user32.dll")]public static extern bool IsIconic(IntPtr hWnd);' -Name 'S' -Namespace 'N' -PassThru}catch{$s=[N.S]};$p=Get-Process -Name '${appName}' -ErrorAction SilentlyContinue|Where-Object{$_.Id}|Select-Object -First 1;if($p){$c::AllowSetForegroundWindow($p.Id);$h=$p.MainWindowHandle;if($h){if(-not ($s::IsIconic($h))){$s::ShowWindow($h,6)}}};Write-Host '${PS_MARKER_PREFIX}${id}'\n`
       );
     } catch {
       psPending.delete(id);

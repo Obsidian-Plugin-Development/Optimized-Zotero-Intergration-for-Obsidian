@@ -1,4 +1,4 @@
-import { Notice, request } from 'obsidian';
+import { Notice } from 'obsidian';
 
 import { t } from '../locale/i18n';
 import { bringObsidianToFront, focusZotero, getCurrentWindow } from '../helpers';
@@ -6,6 +6,7 @@ import { CitationFormat, DatabaseWithPort } from '../types';
 import { defaultHeaders, getPort } from './helpers';
 import { getBibFromCiteKeys } from './jsonRPC';
 import { ZQueue } from './queue';
+import { zoteroRequest, isConnectionError } from './zoteroClient';
 
 export function getCiteKeyFromAny(item: any): CiteKey | null {
   if (!item.citekey && !item.citationKey) return null;
@@ -30,13 +31,14 @@ export async function isZoteroRunning(
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
-    const res = await request({
+    const res = await zoteroRequest({
       method: 'GET',
       url: `http://127.0.0.1:${getPort(
         database.database,
         database.port
       )}/better-bibtex/cayw?probe=true`,
       headers: defaultHeaders,
+      _zoteroSilent: silent || false,
     });
 
     cachedIsRunning = res === 'ready';
@@ -44,11 +46,16 @@ export async function isZoteroRunning(
     ZQueue.end(qid);
     return cachedIsRunning;
   } catch (e) {
-    !silent &&
+    // 连接错误：更新负缓存（30s TTL），避免重复 TCP 探针
+    if (isConnectionError(e)) {
+      cachedIsRunning = false;
+      lastCheck = Date.now();
+    } else if (!silent) {
       new Notice(
         t('notice.zoteroNotRunning'),
         10000
       );
+    }
     ZQueue.end(qid);
     return false;
   }
@@ -91,7 +98,7 @@ export async function getCAYW(
     }
 
     await ZQueue.wait(qid);
-    const res = await request({
+    const res = await zoteroRequest({
       method: 'GET',
       url: `http://127.0.0.1:${getPort(
         database.database,
@@ -106,7 +113,9 @@ export async function getCAYW(
   } catch (e) {
     bringObsidianToFront(win);
     console.error(e);
-    new Notice(`${t('notice.citationError')} ${e.message}`, 10000);
+    if (!isConnectionError(e)) {
+      new Notice(`${t('notice.citationError')} ${e.message}`, 10000);
+    }
     ZQueue.end(qid);
     return null;
   }
@@ -173,7 +182,7 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
   const qid = Symbol();
   try {
     await ZQueue.wait(qid);
-    const res = await request({
+    const res = await zoteroRequest({
       method: 'GET',
       url: `http://127.0.0.1:${getPort(
         database.database,
@@ -200,7 +209,9 @@ export async function getCAYWJSON(database: DatabaseWithPort) {
       bringObsidianToFront(win);
     }, 500);
     console.error(e);
-    new Notice(`${t('notice.citeKeyError')} ${e.message}`, 10000);
+    if (!isConnectionError(e)) {
+      new Notice(`${t('notice.citeKeyError')} ${e.message}`, 10000);
+    }
     ZQueue.end(qid);
     return null;
   }
