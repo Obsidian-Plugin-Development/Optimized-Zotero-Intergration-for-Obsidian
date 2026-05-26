@@ -120,7 +120,7 @@ export async function zoteroRequest(options: ZoteroRequestOptions): Promise<stri
 		if (!portAlive) {
 			_zoteroLikelyRunning = false;
 			// v6.6.5: 不再弹 Notice，改为更新不可达状态（悬浮球图标缓慢闪烁）
-			if (!_zoteroSilent) setZoteroUnreachable(true);
+			setZoteroUnreachable(true);
 			throw new ZoteroNotRunningError();
 		}
 	}
@@ -132,12 +132,9 @@ export async function zoteroRequest(options: ZoteroRequestOptions): Promise<stri
 		setZoteroUnreachable(false);
 		return result;
 	} catch (e) {
-		if (_zoteroSilent) throw e;
-		if (!isConnectionError(e)) throw e;
-
 		_zoteroLikelyRunning = false;
-		// v6.6.5: 不再弹 Notice，改为更新不可达状态（悬浮球图标缓慢闪烁）
-		setZoteroUnreachable(true);
+		// v6.6.5: 更新不可达状态（无论 silent 与否），悬浮球图标缓慢闪烁
+		if (isConnectionError(e)) setZoteroUnreachable(true);
 		throw e;
 	}
 }
