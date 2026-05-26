@@ -8,7 +8,10 @@ let _database: string = 'Zotero';
 let _zoteroLikelyRunning = false;
 
 // v6.6.5: Zotero 不可达状态 + 回调系统（供悬浮球图标闪烁）
+// 注意：_zoteroUnreachable 反映真实 Zotero 可达性（供菜单红色提示判断）
+// _zoteroBlinkSuppressed 控制是否实际触发闪烁动画（用户点击后抑制，Zotero 恢复后重置）
 let _zoteroUnreachable = false;
+let _zoteroBlinkSuppressed = false;
 const _zoteroStateCallbacks: Array<(unreachable: boolean) => void> = [];
 
 export function isZoteroUnreachable(): boolean {
@@ -23,8 +26,31 @@ export function onZoteroStateChange(cb: (unreachable: boolean) => void): () => v
 	};
 }
 
-export function setZoteroUnreachable(val: boolean) {
+// v6.6.5: 用户点击悬浮球 → 停止闪烁，但保留真实状态供菜单红色提示
+export function suppressZoteroBlink(): void {
+	if (!_zoteroUnreachable || _zoteroBlinkSuppressed) return;
+	console.log('[ZoteroState] suppressZoteroBlink — hiding blink, keeping unreachable state');
+	_zoteroBlinkSuppressed = true;
+	// 通知回调停止闪烁
+	for (const cb of _zoteroStateCallbacks) {
+		try { cb(false); } catch { /* 静默 */ }
+	}
+}
+
+function setZoteroUnreachable(val: boolean) {
 	if (_zoteroUnreachable === val) return;
+
+	if (val && _zoteroBlinkSuppressed) {
+		// Zotero 仍不可达但闪烁已被用户抑制 → 更新真实状态，不触发回调
+		console.log('[ZoteroState] setZoteroUnreachable: true (blink suppressed, state tracked)');
+		_zoteroUnreachable = true;
+		return;
+	}
+	if (!val) {
+		// Zotero 恢复 → 重置抑制标记
+		_zoteroBlinkSuppressed = false;
+	}
+
 	console.log('[ZoteroState] setZoteroUnreachable:', val, 'callbacks:', _zoteroStateCallbacks.length);
 	_zoteroUnreachable = val;
 	for (const cb of _zoteroStateCallbacks) {
