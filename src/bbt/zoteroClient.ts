@@ -25,6 +25,7 @@ export function onZoteroStateChange(cb: (unreachable: boolean) => void): () => v
 
 function setZoteroUnreachable(val: boolean) {
 	if (_zoteroUnreachable === val) return;
+	console.log('[ZoteroState] setZoteroUnreachable:', val, 'callbacks:', _zoteroStateCallbacks.length);
 	_zoteroUnreachable = val;
 	for (const cb of _zoteroStateCallbacks) {
 		try { cb(val); } catch { /* 静默 */ }
@@ -35,7 +36,9 @@ function setZoteroUnreachable(val: boolean) {
 
 export async function probeZoteroRecovery(port: number): Promise<void> {
 	if (!_zoteroUnreachable) return;
+	console.log('[ZoteroState] probeZoteroRecovery: probing port', port);
 	const alive = await quickPortProbe('127.0.0.1', port, 80);
+	console.log('[ZoteroState] probeZoteroRecovery result:', alive);
 	if (alive) {
 		_zoteroLikelyRunning = true;
 		setZoteroUnreachable(false);
@@ -138,14 +141,20 @@ export async function zoteroRequest(options: ZoteroRequestOptions): Promise<stri
 
 	try {
 		const result = await request(reqOpts);
+		console.log('[ZoteroState] zoteroRequest SUCCESS — clearing unreachable');
 		_zoteroLikelyRunning = true;
 		// v6.6.5: Zotero 恢复可达 → 清除闪烁
 		setZoteroUnreachable(false);
 		return result;
 	} catch (e) {
+		console.log('[ZoteroState] zoteroRequest FAILED — isConnErr:', isConnectionError(e), _zoteroSilent);
 		_zoteroLikelyRunning = false;
-		// v6.6.5: 更新不可达状态（无论 silent 与否），悬浮球图标缓慢闪烁
-		if (isConnectionError(e)) setZoteroUnreachable(true);
+		// v6.6.5: 连接错误 → Zotero 不可达；非连接错误（404等）→ Zotero 可达但 BBT 忙
+		if (isConnectionError(e)) {
+			setZoteroUnreachable(true);
+		} else {
+			setZoteroUnreachable(false);
+		}
 		throw e;
 	}
 }

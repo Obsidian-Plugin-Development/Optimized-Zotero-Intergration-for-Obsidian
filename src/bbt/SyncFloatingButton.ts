@@ -115,6 +115,7 @@ export class SyncFloatingButton {
     // v6.6.5: Zotero 不可达状态监听 — 在构造函数注册，整个插件生命周期有效
     // 不放在 registerListeners 中，因为 destroy() 会清理其它 listener，但此回调需持久
     this.zoteroStateUnsub = onZoteroStateChange((unreachable) => {
+      console.log('[ZoteroState] SyncFloatingButton callback: unreachable=', unreachable, 'wrapper=', !!this.wrapper);
       this.applyZoteroUnreachableBlink(unreachable);
     });
   }
@@ -820,6 +821,7 @@ export class SyncFloatingButton {
   /** v6.6.5: Zotero 不可达 → 悬浮球图标缓慢闪烁 */
   private applyZoteroUnreachableBlink(unreachable: boolean) {
     const w = this.wrapper;
+    console.log('[ZoteroState] applyZoteroUnreachableBlink:', unreachable, 'wrapper exists:', !!w, 'hasClass:', w ? w.hasClass('zotero-unreachable') : 'N/A');
     if (!w) return;
     if (unreachable) {
       w.addClass('zotero-unreachable');
