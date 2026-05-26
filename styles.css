@@ -760,6 +760,16 @@
     color: var(--text-warning) !important;
 }
 
+/* ── v6.6.5: Zotero 不可达 — 悬浮球图标缓慢闪烁 ── */
+@keyframes zoteroUnreachableBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+.sync-floating-wrapper.zotero-unreachable .sync-icon-wrap {
+    animation: zoteroUnreachableBlink 2.4s ease-in-out infinite;
+    color: var(--text-muted) !important;
+}
+
 /* ── 零延迟 Tooltip：纯 CSS ::after 伪元素，即触即发 ──
    共用样式，方位由 .is-on-left / .is-on-right 控制弹出方向 */
 .sync-floating-wrapper[data-tooltip]:hover::after {

@@ -50,11 +50,7 @@ export async function isZoteroRunning(
     if (isConnectionError(e)) {
       cachedIsRunning = false;
       lastCheck = Date.now();
-    } else if (!silent) {
-      new Notice(
-        t('notice.zoteroNotRunning'),
-        10000
-      );
+    // v6.6.5: Notice removed — Zotero 不可达已由悬浮球闪烁替代
     }
     ZQueue.end(qid);
     return false;

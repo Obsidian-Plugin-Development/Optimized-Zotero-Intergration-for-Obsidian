@@ -7,6 +7,30 @@ let _app: App | null = null;
 let _database: string = 'Zotero';
 let _zoteroLikelyRunning = false;
 
+// v6.6.5: Zotero 不可达状态 + 回调系统（供悬浮球图标闪烁）
+let _zoteroUnreachable = false;
+const _zoteroStateCallbacks: Array<(unreachable: boolean) => void> = [];
+
+export function isZoteroUnreachable(): boolean {
+	return _zoteroUnreachable;
+}
+
+export function onZoteroStateChange(cb: (unreachable: boolean) => void): () => void {
+	_zoteroStateCallbacks.push(cb);
+	return () => {
+		const idx = _zoteroStateCallbacks.indexOf(cb);
+		if (idx >= 0) _zoteroStateCallbacks.splice(idx, 1);
+	};
+}
+
+function setZoteroUnreachable(val: boolean) {
+	if (_zoteroUnreachable === val) return;
+	_zoteroUnreachable = val;
+	for (const cb of _zoteroStateCallbacks) {
+		try { cb(val); } catch { /* 静默 */ }
+	}
+}
+
 // ── 初始化 ──
 
 export function initZoteroClient(app: App, database: string) {
@@ -95,24 +119,25 @@ export async function zoteroRequest(options: ZoteroRequestOptions): Promise<stri
 		const portAlive = await quickPortProbe(host, port, 50);
 		if (!portAlive) {
 			_zoteroLikelyRunning = false;
-			const err = new ZoteroNotRunningError();
-			if (!_zoteroSilent) {
-				new Notice(err.message, 5000);
-			}
-			throw err;
+			// v6.6.5: 不再弹 Notice，改为更新不可达状态（悬浮球图标缓慢闪烁）
+			if (!_zoteroSilent) setZoteroUnreachable(true);
+			throw new ZoteroNotRunningError();
 		}
 	}
 
 	try {
 		const result = await request(reqOpts);
 		_zoteroLikelyRunning = true;
+		// v6.6.5: Zotero 恢复可达 → 清除闪烁
+		setZoteroUnreachable(false);
 		return result;
 	} catch (e) {
 		if (_zoteroSilent) throw e;
 		if (!isConnectionError(e)) throw e;
 
 		_zoteroLikelyRunning = false;
-		new Notice('Zotero 未运行，请手动启动 Zotero 后重试', 5000);
+		// v6.6.5: 不再弹 Notice，改为更新不可达状态（悬浮球图标缓慢闪烁）
+		setZoteroUnreachable(true);
 		throw e;
 	}
 }

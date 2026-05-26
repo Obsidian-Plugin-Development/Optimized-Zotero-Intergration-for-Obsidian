@@ -7,6 +7,7 @@ import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, setLastRe
 import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetadataState, metadataSyncHashCache } from '../citation/metadataSyncDetector';
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
+import { isZoteroUnreachable, onZoteroStateChange } from './zoteroClient';
 /**
  * v5.0.1 磁吸悬浮同步球（Draggable Floating Action Button）
  *
@@ -77,6 +78,8 @@ export class SyncFloatingButton {
   private tweenStartTime = 0;
   private tweenLastTime = 0;
   private pendingSuccess = false;
+  // v6.6.5: Zotero 状态监听取消订阅
+  private zoteroStateUnsub: (() => void) | null = null;
   private static readonly MIN_ANIMATION_MS = 800;
   private static readonly ANIMATION_SPEED = 200; // 百分比/秒
 
@@ -453,6 +456,11 @@ export class SyncFloatingButton {
         this.clampVerticalPosition();
       })
     );
+
+    // v6.6.5: Zotero 不可达状态 → 悬浮球图标缓慢闪烁
+    this.zoteroStateUnsub = onZoteroStateChange((unreachable) => {
+      this.applyZoteroUnreachableBlink(unreachable);
+    });
   }
 
   /**
@@ -768,6 +776,8 @@ export class SyncFloatingButton {
 
     // v7.1: 挂载时根据当前 dirty 状态设置图标
     this.updateBibStatusIcon();
+    // v6.6.5: 挂载时检查 Zotero 不可达初始状态
+    if (isZoteroUnreachable()) this.applyZoteroUnreachableBlink(true);
 
     // 恢复后做一次垂直边界修正 + 方位类名
     requestAnimationFrame(() => {
@@ -802,6 +812,17 @@ export class SyncFloatingButton {
       if (!this.isProgressing) this.applyWarningRing(false);
     }
     this.updateTooltip();
+  }
+
+  /** v6.6.5: Zotero 不可达 → 悬浮球图标缓慢闪烁 */
+  private applyZoteroUnreachableBlink(unreachable: boolean) {
+    const w = this.wrapper;
+    if (!w) return;
+    if (unreachable) {
+      w.addClass('zotero-unreachable');
+    } else {
+      w.removeClass('zotero-unreachable');
+    }
   }
 
   /** 显示/隐藏 SVG 橙色警告环（复用进度环 <circle>，stroke-width 等宽） */
@@ -845,6 +866,8 @@ export class SyncFloatingButton {
     this.closeMenu();
     if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
     if (this.successTimer) { clearTimeout(this.successTimer); this.successTimer = null; }
+    // v6.6.5: 清理 Zotero 状态监听
+    if (this.zoteroStateUnsub) { this.zoteroStateUnsub(); this.zoteroStateUnsub = null; }
     if (this.wrapper) {
       this.cleanup?.();
       // 销毁前保存位置

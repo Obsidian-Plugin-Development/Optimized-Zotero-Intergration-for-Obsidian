@@ -1,9 +1,9 @@
 {
 	"id": "optimized-zotero-integration",
 	"name": "Optimized Zotero Integration",
-	"version": "6.6.4",
+	"version": "6.6.5",
 	"minAppVersion": "1.1.1",
-	"description": "v6.6.3: Zotero未启动拦截确认弹窗 — 用户选择权优先",
+	"description": "v6.6.5: Zotero未启动→悬浮球图标缓慢闪烁替代弹窗提醒",
 	"author": "SuperLabKing",
 	"authorUrl": "https://github.com/SuperLabKing/Optimized-Zotero-Intergration-for-Obsidian",
 	"isDesktopOnly": true
