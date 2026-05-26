@@ -9,6 +9,7 @@ let _zoteroLikelyRunning = false;
 
 // v6.6.5: Zotero 不可达状态 + 回调系统（供悬浮球图标闪烁）
 let _zoteroUnreachable = false;
+let _zoteroUnreachableDismissed = false; // 用户点击悬浮球后暂隐，恢复后重置
 const _zoteroStateCallbacks: Array<(unreachable: boolean) => void> = [];
 
 export function isZoteroUnreachable(): boolean {
@@ -23,7 +24,19 @@ export function onZoteroStateChange(cb: (unreachable: boolean) => void): () => v
 	};
 }
 
+export function dismissZoteroUnreachable(): void {
+	if (!_zoteroUnreachable) return;
+	console.log('[ZoteroState] dismissZoteroUnreachable — user acknowledged');
+	_zoteroUnreachableDismissed = true;
+	setZoteroUnreachable(false);
+}
+
 function setZoteroUnreachable(val: boolean) {
+	// v6.6.5: 用户已手动关闭闪烁 → 屏蔽新的不可达通知，直到 Zotero 恢复
+	if (val && _zoteroUnreachableDismissed) {
+		console.log('[ZoteroState] setZoteroUnreachable: suppressed (dismissed)');
+		return;
+	}
 	if (_zoteroUnreachable === val) return;
 	console.log('[ZoteroState] setZoteroUnreachable:', val, 'callbacks:', _zoteroStateCallbacks.length);
 	_zoteroUnreachable = val;
@@ -143,6 +156,7 @@ export async function zoteroRequest(options: ZoteroRequestOptions): Promise<stri
 		const result = await request(reqOpts);
 		console.log('[ZoteroState] zoteroRequest SUCCESS — clearing unreachable');
 		_zoteroLikelyRunning = true;
+		_zoteroUnreachableDismissed = false;
 		// v6.6.5: Zotero 恢复可达 → 清除闪烁
 		setZoteroUnreachable(false);
 		return result;

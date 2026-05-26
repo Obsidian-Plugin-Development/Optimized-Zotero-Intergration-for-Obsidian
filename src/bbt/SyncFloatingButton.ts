@@ -7,7 +7,7 @@ import { isBibOutOfSync, markBibDirty, markBibClean, onBibDirtyChange, setLastRe
 import { isMetadataOutOfSync, checkMetadataDirty, markMetadataSynced, resetMetadataState, metadataSyncHashCache } from '../citation/metadataSyncDetector';
 
 import { getActiveEditorView } from '../citation/cm6LivePreview';
-import { isZoteroUnreachable, onZoteroStateChange, probeZoteroRecovery } from './zoteroClient';
+import { isZoteroUnreachable, onZoteroStateChange, probeZoteroRecovery, dismissZoteroUnreachable } from './zoteroClient';
 import { getPort } from './helpers';
 /**
  * v5.0.1 磁吸悬浮同步球（Draggable Floating Action Button）
@@ -1084,6 +1084,12 @@ export class SyncFloatingButton {
       return;
     }
 
+    // v6.6.5: 记录 Zotero 状态（用于菜单静默提示），然后停止闪烁
+    const wasUnreachable = isZoteroUnreachable();
+    if (wasUnreachable) {
+      dismissZoteroUnreachable();
+    }
+
     // v6.6.5: 点击时主动探测 Zotero 是否已恢复，避免等待下一轮心跳（最多 25s）
     const port = getPort(this.plugin.settings.database, this.plugin.settings.port);
     probeZoteroRecovery(parseInt(port, 10));
@@ -1104,7 +1110,7 @@ export class SyncFloatingButton {
     if (menuCommands.length === 1) {
       this.executeCommand(menuCommands[0]);
     } else {
-      this.showCommandMenu(menuCommands);
+      this.showCommandMenu(menuCommands, wasUnreachable);
     }
   }
 
@@ -1122,7 +1128,7 @@ export class SyncFloatingButton {
 
   // ── 弹出菜单 ──
 
-  private showCommandMenu(commands: string[]) {
+  private showCommandMenu(commands: string[], showZoteroHint = false) {
     this.closeMenu();
     const btn = this.button!;
 
@@ -1145,6 +1151,23 @@ export class SyncFloatingButton {
       'transform: scale(0.92)',
       'transition: opacity 0.15s ease, transform 0.15s ease',
     ].join(';');
+
+    // v6.6.5: Zotero 未启动静默提示（菜单底部）
+    if (showZoteroHint) {
+      const hint = menu.createDiv('sync-floating-menu-hint');
+      hint.setText('Zotero 未启动');
+      hint.style.cssText = [
+        'padding: 6px 18px',
+        'font-size: 12px',
+        'color: var(--text-muted)',
+        'border-top: 1px solid var(--background-modifier-border)',
+        'margin-top: 4px',
+        'padding-top: 8px',
+        'text-align: center',
+        'cursor: default',
+        'user-select: none',
+      ].join(';');
+    }
 
     // v6.5.0: 根据脏状态决定推荐高亮
     const highlightMetadata = isMetadataOutOfSync;
