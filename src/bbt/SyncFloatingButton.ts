@@ -111,6 +111,11 @@ export class SyncFloatingButton {
     this.plugin = plugin;
     SyncFloatingButton.instance = this;
     this.registerListeners();
+    // v6.6.5: Zotero 不可达状态监听 — 在构造函数注册，整个插件生命周期有效
+    // 不放在 registerListeners 中，因为 destroy() 会清理其它 listener，但此回调需持久
+    this.zoteroStateUnsub = onZoteroStateChange((unreachable) => {
+      this.applyZoteroUnreachableBlink(unreachable);
+    });
   }
 
   // ── v6.3.1 生命周期 + 视觉补间引擎 ──
@@ -328,7 +333,7 @@ export class SyncFloatingButton {
       w.removeClass('is-progressing');
       w.removeClass('is-loading');
       w.removeClass('is-success');
-      w.removeClass('zotero-unreachable');
+      // 注意: zotero-unreachable 是全局 Zotero 连接状态，非 per-file，不在此清理
       w.addClass('is-idle');
       w.removeAttribute('data-tooltip');
     }
@@ -458,10 +463,6 @@ export class SyncFloatingButton {
       })
     );
 
-    // v6.6.5: Zotero 不可达状态 → 悬浮球图标缓慢闪烁
-    this.zoteroStateUnsub = onZoteroStateChange((unreachable) => {
-      this.applyZoteroUnreachableBlink(unreachable);
-    });
   }
 
   /**
@@ -867,8 +868,6 @@ export class SyncFloatingButton {
     this.closeMenu();
     if (this.tweenRafId) { cancelAnimationFrame(this.tweenRafId); this.tweenRafId = null; }
     if (this.successTimer) { clearTimeout(this.successTimer); this.successTimer = null; }
-    // v6.6.5: 清理 Zotero 状态监听
-    if (this.zoteroStateUnsub) { this.zoteroStateUnsub(); this.zoteroStateUnsub = null; }
     if (this.wrapper) {
       this.cleanup?.();
       // 销毁前保存位置
@@ -993,9 +992,11 @@ export class SyncFloatingButton {
       if (!this.dragging) return;
       this.dragging = false;
 
-      btn.style.cursor = 'grab';
-      btn.style.boxShadow = 'var(--shadow-l)';
-      btn.style.transform = 'scale(1)';
+      // v6.6.5 fix: 清除拖拽/点击期间的内联样式，让 CSS 规则重新接管
+      // 否则 style.boxShadow 会永久覆盖 CSS box-shadow:none，造成"幽灵阴影"
+      btn.style.cursor = '';
+      btn.style.boxShadow = '';
+      btn.style.transform = '';
 
       if (this.hasMoved) {
         this.snapToEdge();
