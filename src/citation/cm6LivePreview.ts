@@ -401,10 +401,11 @@ class CitationPluginValue implements PluginValue {
 			setLastCitationSignature(filePath, currentSignature);
 		} else if (currentSignature !== cachedSignature) {
 			if (currentSignature === "") {
-				console.log("[cm6LivePreview] 检测到所有引注已删除，标记 clean（静默，保留基线）");
-				markBibClean(true);
-				// v6.6.1: 同时清除 refHash 基线，防止下方 refHash 检查因
-				// currentRefHash === null 而误触发 markBibDirty 覆盖 clean 状态
+				// v6.6.4: 所有引注已删除但参考文献区块仍可能有旧条目，
+				// 应标记 dirty 提示用户更新参考文献，而非标记 clean。
+				console.log("[cm6LivePreview] 检测到所有引注已删除，标记 dirty");
+				markBibDirty();
+				try { _plugin.emitter.trigger("bibDirty"); } catch { /* 静默 */ }
 				clearLastRefHash(filePath);
 			} else {
 				markBibDirty();

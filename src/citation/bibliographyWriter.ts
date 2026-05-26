@@ -372,6 +372,9 @@ export function updateBibliographyText(view: EditorView, filePath?: string) {
 
 		setBibDirty(false);
 		setLastCitationSignature(filePath || '', '');
+		// v6.6.4: 同步清除 refHash 缓存，防止后续 CM6 viewport 更新
+		// 因 cachedRefHash 残留旧值而误触发 markBibDirty
+		clearLastRefHash(filePath || '');
 		return;
 	}
 
