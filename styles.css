@@ -743,7 +743,7 @@
 }
 
 /* ── Idle Hover: 3D 抬升 + 立体阴影（纯圆无边框）── */
-.sync-floating-wrapper:not(.is-progressing):hover {
+.sync-floating-wrapper.is-idle:hover {
     transform: translateY(-2px);
     box-shadow:
         0 4px 12px rgba(0, 0, 0, 0.2),
@@ -751,7 +751,7 @@
 }
 
 /* ── Hover 图标转紫（仅 clean 闲置态；警告态保持橙色不动）── */
-.sync-floating-wrapper:not(.is-progressing):not(.has-updates-ring):hover .sync-icon-wrap {
+.sync-floating-wrapper.is-idle:not(.has-updates-ring):hover .sync-icon-wrap {
     color: var(--interactive-accent) !important;
 }
 
@@ -763,10 +763,10 @@
 /* ── v6.6.5: Zotero 不可达 — 悬浮球图标缓慢闪烁 ── */
 @keyframes zoteroUnreachableBlink {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+    50% { opacity: 0.2; }
 }
 .sync-floating-wrapper.zotero-unreachable .sync-icon-wrap {
-    animation: zoteroUnreachableBlink 1.5s ease-in-out infinite;
+    animation: zoteroUnreachableBlink 1.0s ease-in-out infinite;
     color: var(--text-muted) !important;
 }
 
