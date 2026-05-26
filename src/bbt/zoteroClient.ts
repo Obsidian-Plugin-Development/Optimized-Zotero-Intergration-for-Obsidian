@@ -31,6 +31,17 @@ function setZoteroUnreachable(val: boolean) {
 	}
 }
 
+// ── v6.6.5: 快速恢复探测 — 供悬浮球点击时主动检测 Zotero 是否已恢复 ──
+
+export async function probeZoteroRecovery(port: number): Promise<void> {
+	if (!_zoteroUnreachable) return;
+	const alive = await quickPortProbe('127.0.0.1', port, 80);
+	if (alive) {
+		_zoteroLikelyRunning = true;
+		setZoteroUnreachable(false);
+	}
+}
+
 // ── 初始化 ──
 
 export function initZoteroClient(app: App, database: string) {
